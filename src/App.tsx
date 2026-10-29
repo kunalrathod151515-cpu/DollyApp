@@ -1051,7 +1051,7 @@ export default function App() {
   const isAdmin = currentUser.role === 'ADMIN';
 
   return (
-    <div className="min-h-screen bg-[#f4f6fb] text-[#0f172a] pb-36 font-sans">
+    <div className="min-h-screen bg-[#f4f6fb] text-[#0f172a] pb-10 font-sans">
       {/* ================= TOP APP BAR ================= */}
       <header className="sticky top-0 z-50 bg-[#0f172a] text-white px-3 sm:px-4 py-2.5 shadow-lg">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
@@ -1185,20 +1185,54 @@ export default function App() {
         ))}
       </div>
 
-      {/* Role Notice Banner */}
-      <div className="bg-slate-100 border-b border-slate-200 px-4 py-2">
-        <div className="max-w-6xl mx-auto flex items-center justify-between text-xs">
+      {/* Role Notice & Admin Workspace Switcher */}
+      <div className="bg-slate-100 border-b border-slate-200 px-3 sm:px-4 py-2">
+        <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">Logged in as:</span>
+            <span className="font-bold text-slate-500">Staff:</span>
             <span className="font-extrabold text-slate-900">{currentUser.name}</span>
-            <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold text-[10px] uppercase">
-              Role: {currentUser.role}
+            <span className="bg-[#ff5722]/10 text-[#ff5722] border border-[#ff5722]/20 px-2 py-0.5 rounded font-black text-[10px] uppercase">
+              {currentUser.role}
             </span>
           </div>
+
+          {/* If Super Admin, show quick role switcher tabs right at the top */}
           {isAdmin && (
-            <span className="text-[11px] font-bold text-[#ff5722] hidden sm:inline">
-              🛡️ Super Admin Control: Full Access across Waiter, Kitchen, Manager & Outlets
-            </span>
+            <div className="flex items-center gap-1 bg-white p-0.5 rounded-xl border border-slate-300 shadow-sm">
+              <span className="text-[10px] font-bold text-slate-400 px-2">View:</span>
+              <button
+                onClick={() => setCurrentRole('ADMIN')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
+                  currentRole === 'ADMIN' ? 'bg-[#ff5722] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Admin Panel
+              </button>
+              <button
+                onClick={() => setCurrentRole('WAITER')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
+                  currentRole === 'WAITER' ? 'bg-[#ff5722] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Waiter
+              </button>
+              <button
+                onClick={() => setCurrentRole('KITCHEN')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
+                  currentRole === 'KITCHEN' ? 'bg-[#ff5722] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Kitchen
+              </button>
+              <button
+                onClick={() => setCurrentRole('MANAGER')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
+                  currentRole === 'MANAGER' ? 'bg-[#ff5722] text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Manager
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1466,7 +1500,7 @@ export default function App() {
 
             {/* Floating Bottom Cart Bar for Waiter */}
             {cartKeys.length > 0 && (
-              <div className="fixed bottom-20 left-3 right-3 max-w-xl mx-auto bg-[#0f172a] text-white p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-700 z-40 animate-slide-up">
+              <div className="fixed bottom-4 left-3 right-3 max-w-xl mx-auto bg-[#0f172a] text-white p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-700 z-40 animate-slide-up">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="font-extrabold text-sm sm:text-base text-white truncate">
@@ -2056,94 +2090,7 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* ================= BOTTOM NAVIGATION DOCK ================= */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 grid grid-cols-4 px-2 py-2 z-50 shadow-2xl">
-        <button
-          onClick={() => {
-            if (isAdmin || currentUser.role === 'WAITER') {
-              setCurrentRole('WAITER');
-            } else {
-              showToast('Only Waiter or Admin has access to order punch');
-            }
-          }}
-          className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-black transition relative cursor-pointer ${
-            currentRole === 'WAITER'
-              ? 'text-[#ff5722] bg-orange-50'
-              : !isAdmin && currentUser.role !== 'WAITER'
-              ? 'text-slate-300 opacity-60'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <UtensilsCrossed className="w-5 h-5 mb-0.5" />
-          <span>Waiter</span>
-        </button>
-
-        <button
-          onClick={() => {
-            if (isAdmin || currentUser.role === 'KITCHEN') {
-              setCurrentRole('KITCHEN');
-            } else {
-              showToast('Only Kitchen Chef or Admin has access to KDS');
-            }
-          }}
-          className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-black transition relative cursor-pointer ${
-            currentRole === 'KITCHEN'
-              ? 'text-[#ff5722] bg-orange-50'
-              : !isAdmin && currentUser.role !== 'KITCHEN'
-              ? 'text-slate-300 opacity-60'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Flame className="w-5 h-5 mb-0.5" />
-          <span>Kitchen</span>
-          {kitchenPendingKots.length > 0 && (
-            <span className="absolute top-1 right-[22%] bg-red-500 text-white text-[10px] font-black px-1.5 py-0.2 rounded-full">
-              {kitchenPendingKots.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => {
-            if (isAdmin || currentUser.role === 'MANAGER') {
-              setCurrentRole('MANAGER');
-            } else {
-              showToast('Only Manager or Admin has access to billing & menu');
-            }
-          }}
-          className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-black transition relative cursor-pointer ${
-            currentRole === 'MANAGER'
-              ? 'text-[#ff5722] bg-orange-50'
-              : !isAdmin && currentUser.role !== 'MANAGER'
-              ? 'text-slate-300 opacity-60'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Receipt className="w-5 h-5 mb-0.5" />
-          <span>Manager</span>
-        </button>
-
-        <button
-          onClick={() => {
-            if (isAdmin) {
-              setCurrentRole('ADMIN');
-            } else {
-              showToast('Admin panel is restricted to Super Admin only');
-            }
-          }}
-          className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-black transition relative cursor-pointer ${
-            currentRole === 'ADMIN'
-              ? 'text-[#ff5722] bg-orange-50'
-              : !isAdmin
-              ? 'text-slate-300 opacity-60'
-              : 'text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <ShieldAlert className="w-5 h-5 mb-0.5" />
-          <span>Admin</span>
-        </button>
-      </nav>
     </div>
   );
 }
+
