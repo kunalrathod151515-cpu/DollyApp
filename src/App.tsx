@@ -191,7 +191,20 @@ function playAudioBeep(freq = 680) {
 
 export default function App() {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
-  const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [showInstallGuide, setShowInstallGuide] = useState(false);
+
+  const handleInstallClick = async () => {
+    if (isInstallable) {
+      try {
+        const success = await install();
+        if (!success) setShowInstallGuide(true);
+      } catch {
+        setShowInstallGuide(true);
+      }
+    } else {
+      setShowInstallGuide(true);
+    }
+  };
 
   // Network State
   const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
@@ -1025,15 +1038,61 @@ export default function App() {
           </div>
 
           {/* In-app Install Prompt button on Login screen */}
-          {isInstallable && (
+          {!isInstalled && (
             <div className="mt-4 text-center">
               <button
-                onClick={install}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl shadow-md transition"
+                type="button"
+                onClick={handleInstallClick}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl shadow-md transition cursor-pointer"
               >
                 <Download className="w-4 h-4 text-orange-400" />
-                <span>Install POS App on this Device (Works Offline)</span>
+                <span>📲 Install POS App on this Device (Works Offline)</span>
               </button>
+            </div>
+          )}
+
+          {/* Universal Install Guide Modal on Login screen */}
+          {showInstallGuide && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+              <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-slate-900 border border-slate-200">
+                <div className="flex items-center gap-2.5 mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black shadow-md shadow-orange-500/30">
+                    <Download className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Install Dolly POS</h3>
+                    <p className="text-[11px] text-slate-500 font-medium">Add to your Home Screen</p>
+                  </div>
+                </div>
+
+                {isIOS ? (
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-2 mt-3">
+                    <p className="font-extrabold text-slate-900">On iPhone / iPad Safari:</p>
+                    <p>1. Tap the <b>Share</b> button (square with arrow) at the bottom.</p>
+                    <p>2. Scroll down and tap <b>"Add to Home Screen"</b>.</p>
+                    <p>3. Tap <b>"Add"</b> in the top right corner.</p>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-2 mt-3">
+                    <p className="font-extrabold text-slate-900">On Android Chrome:</p>
+                    <p>1. Tap the <b>three dots menu (⋮)</b> in the top-right corner of Chrome.</p>
+                    <p>2. Tap <b>"Install app"</b> or <b>"Add to Home screen"</b>.</p>
+                    <p>3. Tap <b>"Install"</b> to confirm.</p>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                  ⭐ Once installed, Dolly POS launches fullscreen without browser address bars and works 100% offline!
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => setShowInstallGuide(false)}
+                  className="mt-4 w-full rounded-xl bg-[#0f172a] text-white py-2.5 text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
+                >
+                  Understood
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1095,24 +1154,16 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Install PWA Button (In-App) */}
-            {isInstallable && !isInstalled && (
+            {/* Install PWA Button (Visible unless already running in standalone mode) */}
+            {!isInstalled && (
               <button
-                onClick={install}
-                className="hidden sm:inline-flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-full shadow-md shadow-orange-500/20 hover:opacity-95 transition"
-                title="Install App for full offline use"
+                type="button"
+                onClick={handleInstallClick}
+                className="inline-flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-black text-xs px-3 py-1.5 rounded-full shadow-md shadow-orange-500/20 hover:opacity-95 transition cursor-pointer"
+                title="Install App on this Device"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Install POS</span>
-              </button>
-            )}
-
-            {isIOS && !isInstalled && (
-              <button
-                onClick={() => setShowIOSGuide(true)}
-                className="hidden sm:inline-flex items-center gap-1.5 bg-slate-800 text-slate-300 border border-slate-700 font-extrabold text-xs px-2.5 py-1.5 rounded-full hover:text-white transition"
-              >
-                <span>Install on iOS</span>
               </button>
             )}
 
@@ -1153,21 +1204,45 @@ export default function App() {
         </div>
       )}
 
-      {/* iOS Safari Install Guide Modal */}
-      {showIOSGuide && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
-            <h3 className="text-base font-black text-slate-900">Install POSHub on iPhone / iPad</h3>
-            <p className="mt-3 text-xs text-slate-600 leading-relaxed">
-              1. Tap the <b>Share</b> button (square with arrow) at the bottom of Safari.<br />
-              2. Scroll down and tap <b>Add to Home Screen</b>.<br />
-              3. Tap <b>Add</b>. The POS will launch like a standalone app with full offline support.
+      {/* Universal Install Guide Modal (Android Chrome & iOS Safari) */}
+      {showInstallGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl text-slate-900 border border-slate-200">
+            <div className="flex items-center gap-2.5 mb-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black shadow-md shadow-orange-500/30">
+                <Download className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">Install Dolly POS App</h3>
+                <p className="text-[11px] text-slate-500 font-medium">Add to your Phone Home Screen</p>
+              </div>
+            </div>
+
+            {isIOS ? (
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-2 mt-3">
+                <p className="font-extrabold text-slate-900">On iPhone / iPad Safari:</p>
+                <p>1. Tap the <b>Share</b> button (square with arrow) at the bottom.</p>
+                <p>2. Scroll down and tap <b>"Add to Home Screen"</b>.</p>
+                <p>3. Tap <b>"Add"</b> in the top right corner.</p>
+              </div>
+            ) : (
+              <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs text-slate-700 space-y-2 mt-3">
+                <p className="font-extrabold text-slate-900">On Android Chrome:</p>
+                <p>1. Tap the <b>three dots menu (⋮)</b> in the top-right corner of Chrome.</p>
+                <p>2. Tap <b>"Install app"</b> or <b>"Add to Home screen"</b>.</p>
+                <p>3. Tap <b>"Install"</b> to confirm.</p>
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+              ⭐ Once installed, Dolly POS launches fullscreen without browser address bars and works 100% offline!
             </p>
+
             <button
-              onClick={() => setShowIOSGuide(false)}
-              className="mt-5 w-full rounded-xl bg-[#0f172a] text-white py-2.5 text-xs font-bold hover:bg-slate-800 transition"
+              onClick={() => setShowInstallGuide(false)}
+              className="mt-4 w-full rounded-xl bg-[#0f172a] text-white py-2.5 text-xs font-bold hover:bg-slate-800 transition cursor-pointer"
             >
-              Close
+              Understood
             </button>
           </div>
         </div>

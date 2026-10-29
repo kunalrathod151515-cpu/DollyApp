@@ -15,29 +15,30 @@ export default defineConfig(() => {
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
         manifest: {
           id: '/',
-          name: 'POSHub Pro - Restaurant KOT & Billing',
-          short_name: 'POSHub',
+          name: 'Dolly POS - Restaurant KOT & Billing',
+          short_name: 'DollyPOS',
           description: 'Offline-ready multi-restaurant POS with live KOT order punch, Kitchen Display System (KDS), and billing.',
           theme_color: '#0f172a',
           background_color: '#0f172a',
           display: 'standalone',
-          start_url: './',
-          scope: './',
+          orientation: 'any',
+          start_url: '/',
+          scope: '/',
           icons: [
             {
-              src: 'pwa-192x192.png',
+              src: '/pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any'
             },
             {
-              src: 'pwa-512x512.png',
+              src: '/pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any'
             },
             {
-              src: 'pwa-maskable-512x512.png',
+              src: '/pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable'
