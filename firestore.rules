@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Restaurants
+    match /restaurants/{restaurantId} {
+      allow read: if true;
+      allow write: if isValidId(restaurantId);
+    }
+
+    // Menus
+    match /menus/{menuId} {
+      allow read: if true;
+      allow write: if isValidId(menuId);
+    }
+
+    // Kitchen Order Tickets (KOT)
+    match /kots/{kotId} {
+      allow read: if true;
+      allow write: if isValidId(kotId);
+    }
+
+    // Completed Orders (Settled bills)
+    match /completed_orders/{orderId} {
+      allow read: if true;
+      allow write: if isValidId(orderId);
+    }
+
+    // Staff credentials
+    match /staff/{staffId} {
+      allow read: if true;
+      allow write: if isValidId(staffId);
+    }
+
+    // Connection test document
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}

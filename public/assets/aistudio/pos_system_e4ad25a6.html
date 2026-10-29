@@ -1,0 +1,1164 @@
+﻿<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>POSHub Pro - Restaurant KOT & Billing</title>
+  <style>
+    :root {
+      --bg: #f4f6fb;
+      --surface: #ffffff;
+      --dark: #0f172a;
+      --dark-card: #1e293b;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #e2e8f0;
+      --primary: #ff5722;
+      --primary-grad: linear-gradient(135deg, #ff6b35 0%, #f73819 100%);
+      --primary-soft: #fff3ef;
+      --green: #10b981;
+      --green-soft: #d1fae5;
+      --amber: #f59e0b;
+      --amber-soft: #fef3c7;
+      --blue: #3b82f6;
+      --blue-soft: #dbeafe;
+      --red: #ef4444;
+      --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.05);
+      --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.09);
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding-bottom: 145px; /* बॉटम नेव और कार्ट बार के लिए जगह */
+      overflow-x: hidden;
+    }
+    /* ================= TOP APP BAR ================= */
+    .topbar {
+      background: var(--dark);
+      color: #fff;
+      padding: 12px 16px;
+      position: sticky;
+      top: 0;
+      z-index: 90;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    }
+    .topbar-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-area { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-logo {
+      background: var(--primary-grad);
+      width: 38px;
+      height: 38px;
+      border-radius: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 17px;
+      flex-shrink: 0;
+      box-shadow: 0 4px 10px rgba(255, 87, 34, 0.35);
+    }
+    .tenant-select {
+      background: var(--dark-card);
+      color: #fff;
+      border: 1px solid #334155;
+      padding: 6px 10px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 700;
+      max-width: 185px;
+      text-overflow: ellipsis;
+      outline: none;
+    }
+    .status-area { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .sync-badge {
+      background: var(--dark-card);
+      border: 1px solid #334155;
+      padding: 6px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .net-pill {
+      border: none;
+      padding: 7px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: 0.2s;
+    }
+    .net-pill.online { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #059669; }
+    .net-pill.offline { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #d97706; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: blink 1.4s infinite; }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    /* ================= MAIN CONTAINER ================= */
+    .app-container {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 14px;
+    }
+    /* Sub-Switcher for Mobile Waiter View */
+    .sub-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: #e2e8f0;
+      padding: 4px;
+      border-radius: 12px;
+      margin-bottom: 14px;
+    }
+    @media (min-width: 900px) {
+      .sub-tabs { display: none; }
+    }
+    .sub-tab-btn {
+      border: none;
+      background: transparent;
+      padding: 9px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--muted);
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    .sub-tab-btn.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow-sm);
+    }
+    .waiter-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 900px) {
+      .waiter-layout { grid-template-columns: 7fr 5fr; }
+      #waiterOrderCol, #waiterKotCol { display: block !important; }
+    }
+    /* ================= CARDS & HEADINGS ================= */
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      padding: 16px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 14px;
+    }
+    .sec-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .sec-title {
+      font-size: 15px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .step-badge {
+      background: var(--primary-soft);
+      color: var(--primary);
+      width: 24px;
+      height: 24px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    /* ================= TABLE PILLS ================= */
+    .table-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    @media (min-width: 550px) {
+      .table-grid { grid-template-columns: repeat(6, 1fr); }
+    }
+    .t-card {
+      border: 2px solid var(--border);
+      background: #f8fafc;
+      border-radius: 14px;
+      padding: 12px 10px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: left;
+      position: relative;
+    }
+    .t-card.occupied {
+      background: var(--amber-soft);
+      border-color: #fbbf24;
+    }
+    .t-card.selected {
+      background: var(--primary-soft);
+      border-color: var(--primary);
+      box-shadow: 0 4px 12px rgba(255, 87, 34, 0.2);
+      transform: translateY(-2px);
+    }
+    .t-name { font-weight: 900; font-size: 14px; color: var(--text); display: block; }
+    .t-status { font-size: 11px; font-weight: 700; margin-top: 3px; display: inline-block; }
+    /* ================= CATEGORY & MENU CARDS ================= */
+    .cat-scroll {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      scrollbar-width: none;
+    }
+    .cat-scroll::-webkit-scrollbar { display: none; }
+    .cat-chip {
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      color: var(--muted);
+      padding: 7px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .cat-chip.active {
+      background: var(--dark);
+      color: #fff;
+      border-color: var(--dark);
+    }
+    .search-box {
+      width: 100%;
+      background: #f8fafc;
+      border: 1.5px solid var(--border);
+      padding: 11px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      outline: none;
+      transition: 0.2s;
+    }
+    .search-box:focus { border-color: var(--primary); background: #fff; }
+    .menu-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    @media (min-width: 550px) {
+      .menu-grid { grid-template-columns: 1fr 1fr; }
+    }
+    .dish-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 14px;
+      border: 1.5px solid var(--border);
+      background: #fff;
+      transition: 0.15s;
+    }
+    .dish-card.active {
+      border-color: var(--primary);
+      background: var(--primary-soft);
+    }
+    .veg-dot {
+      width: 12px;
+      height: 12px;
+      border: 1.5px solid var(--green);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 3px;
+      margin-right: 5px;
+    }
+    .veg-dot::after { content: ''; width: 6px; height: 6px; background: var(--green); border-radius: 50%; }
+    .dish-title { font-weight: 800; font-size: 14px; color: var(--text); }
+    .dish-price { font-weight: 800; font-size: 13px; color: var(--muted); margin-top: 3px; }
+    .qty-box { display: flex; align-items: center; gap: 8px; }
+    .q-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: none;
+      font-size: 18px;
+      font-weight: 900;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: 0.15s;
+    }
+    .q-minus { background: #e2e8f0; color: var(--text); }
+    .q-plus { background: var(--primary-grad); color: #fff; box-shadow: 0 3px 8px rgba(255, 87, 34, 0.25); }
+    .q-num { font-weight: 900; font-size: 15px; min-width: 18px; text-align: center; }
+    /* ================= FLOATING STICKY CART BAR ================= */
+    .floating-cart {
+      position: fixed;
+      bottom: 74px;
+      left: 12px;
+      right: 12px;
+      max-width: 680px;
+      margin: 0 auto;
+      background: var(--dark);
+      color: #fff;
+      padding: 12px 14px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+      z-index: 95;
+      border: 1px solid #334155;
+      animation: slideUp 0.2s ease-out;
+    }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .cart-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .note-mini {
+      width: 100%;
+      background: var(--dark-card);
+      border: 1px solid #334155;
+      color: #fff;
+      padding: 8px 10px;
+      border-radius: 9px;
+      font-size: 12px;
+      margin-top: 8px;
+      outline: none;
+    }
+    .btn-kot-send {
+      background: var(--primary-grad);
+      color: #fff;
+      border: none;
+      padding: 11px 18px;
+      border-radius: 11px;
+      font-weight: 900;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(255, 87, 34, 0.4);
+    }
+    /* ================= KOT TICKET & STEPPER ================= */
+    .kot-ticket {
+      background: #fff;
+      border: 1.5px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      margin-bottom: 12px;
+      box-shadow: var(--shadow-sm);
+    }
+    .kot-ticket.READY { border-color: var(--green); background: #f0fdf4; }
+    .kot-ticket.COOKING { border-color: var(--blue); }
+    .kot-ticket.COOKING_STARTED { border-color: var(--amber); }
+    .badge-status {
+      font-size: 10px;
+      font-weight: 900;
+      padding: 4px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .st-CREATED { background: #e2e8f0; color: #334155; }
+    .st-COOKING_STARTED { background: var(--amber-soft); color: #b45309; }
+    .st-COOKING { background: var(--blue-soft); color: #1d4ed8; }
+    .st-READY { background: var(--green); color: #fff; }
+    /* Visual Progress Bar inside Waiter KOT Card */
+    .progress-track {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      margin: 10px 0;
+    }
+    .prog-step {
+      height: 5px;
+      border-radius: 4px;
+      background: #e2e8f0;
+    }
+    .prog-step.done { background: var(--green); }
+    .prog-step.active { background: var(--primary); }
+    /* Kitchen Grid */
+    .kds-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    @media (min-width: 680px) { .kds-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (min-width: 1024px) { .kds-grid { grid-template-columns: repeat(3, 1fr); } }
+    .kds-btn-group {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border);
+    }
+    .kds-btn {
+      border: none;
+      padding: 11px 6px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+      transition: 0.15s;
+    }
+    /* ================= BOTTOM NAVIGATION DOCK ================= */
+    .bottom-dock {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #ffffff;
+      border-top: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 6px 8px 10px;
+      z-index: 100;
+      box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.08);
+    }
+    .nav-item {
+      border: none;
+      background: transparent;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 6px 4px;
+      border-radius: 12px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+      position: relative;
+      transition: 0.2s;
+    }
+    .nav-item .nav-icon { font-size: 19px; line-height: 1; }
+    .nav-item.active {
+      color: var(--primary);
+      background: var(--primary-soft);
+    }
+    .nav-badge {
+      position: absolute;
+      top: 2px;
+      right: 22%;
+      background: var(--red);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 900;
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+    .hidden { display: none !important; }
+    #toastContainer {
+      position: fixed;
+      top: 72px;
+      right: 14px;
+      left: 14px;
+      max-width: 380px;
+      margin: 0 auto;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--dark);
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 700;
+      box-shadow: var(--shadow-md);
+      border-left: 4px solid var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <!-- ================= TOP BAR ================= -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand-area">
+        <div class="brand-logo">P</div>
+        <div>
+          <div style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase;">Multi-Restaurant POS</div>
+          <select id="restaurantSelect" onchange="switchRestaurant(this.value)" class="tenant-select"></select>
+        </div>
+      </div>
+      <div class="status-area">
+        <div onclick="forceCloudSync()" class="sync-badge" title="Click to Sync Offline Data">
+          <span>☁️</span>
+          <span id="syncCountBadge" style="color:#fbbf24;">0</span>
+        </div>
+        <button onclick="toggleNetworkMode()" id="networkToggleBtn" class="net-pill online">
+          <span class="pulse"></span>
+          <span id="netText">ONLINE</span>
+        </button>
+      </div>
+    </div>
+  </header>
+  <div id="toastContainer"></div>
+  <!-- ================= MAIN CONTENT ================= -->
+  <main class="app-container">
+    <!-- 1. WAITER WORKSPACE -->
+    <section id="panel-WAITER" class="role-panel">
+      <!-- Mobile Sub-Tabs (Order vs Live KOT Status) -->
+      <div class="sub-tabs">
+        <button id="subTabOrder" onclick="switchWaiterSubTab('ORDER')" class="sub-tab-btn active">
+          🍽️ Punch Order
+        </button>
+        <button id="subTabKot" onclick="switchWaiterSubTab('KOT')" class="sub-tab-btn">
+          📡 Live KOT Status (<span id="mobileKotCount">0</span>)
+        </button>
+      </div>
+      <div class="waiter-layout">
+        <!-- Column 1: Table & Menu Selection -->
+        <div id="waiterOrderCol">
+          <div class="card">
+            <div class="sec-head">
+              <div class="sec-title"><span class="step-badge">1</span>Select Table</div>
+              <div style="font-size:11px; font-weight:700; color:var(--muted);">🟢 Free &nbsp; 🟠 Running</div>
+            </div>
+            <div id="waiterTableGrid" class="table-grid"></div>
+          </div>
+          <div class="card">
+            <div class="sec-head">
+              <div class="sec-title">
+                <span class="step-badge">2</span>Select Menu
+                <span id="selectedTableLabel" style="color:var(--primary); font-weight:900;">(Table 1)</span>
+              </div>
+            </div>
+            <!-- Category Chips -->
+            <div id="categoryScroll" class="cat-scroll"></div>
+            <input type="text" id="menuSearchInput" oninput="renderWaiterMenu()" placeholder="🔍 Search Paneer, Roti, Biryani..." class="search-box">
+            <div id="waiterMenuGrid" class="menu-grid"></div>
+          </div>
+        </div>
+        <!-- Column 2: Live KOT Feed from Kitchen -->
+        <div id="waiterKotCol" class="hidden">
+          <div class="card">
+            <div class="sec-head">
+              <div class="sec-title">📡 Live Kitchen KOT Status</div>
+              <span style="font-size:11px; font-weight:800; color:var(--blue); background:var(--blue-soft); padding:4px 9px; border-radius:12px;">Real-time LAN</span>
+            </div>
+            <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+              किचन से कुकिंग स्टार्ट या रेडी होते ही यहाँ अपने आप अपडेट होगा:
+            </p>
+            <div id="waiterLiveKotList"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Sticky Floating Cart Bar for Waiter -->
+      <div id="floatingCartBar" class="floating-cart hidden">
+        <div class="cart-top">
+          <div>
+            <div id="cartSummaryTitle" style="font-weight:900; font-size:14px; color:#fff;">0 Items | ₹0</div>
+            <div id="cartItemsPreview" style="font-size:11px; color:#cbd5e1; max-width:210px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>
+          </div>
+          <button onclick="confirmKOT()" class="btn-kot-send">🚀 Confirm KOT</button>
+        </div>
+        <input type="text" id="kotSpecialNote" placeholder="📝 Chef Note (e.g. Less Spicy, Jain, No Onion)..." class="note-mini">
+      </div>
+    </section>
+    <!-- 2. KITCHEN (KDS) WORKSPACE -->
+    <section id="panel-KITCHEN" class="role-panel hidden">
+      <div class="card" style="background:var(--dark); color:#fff; border:none;">
+        <div class="sec-head" style="margin-bottom:4px;">
+          <div class="sec-title" style="font-size:17px;">🔥 Kitchen Display System (KDS)</div>
+          <span style="font-size:11px; background:#334155; padding:4px 10px; border-radius:12px;">Live Tickets</span>
+        </div>
+        <p style="font-size:12px; color:#94a3b8;">
+          नीचे कार्ड्स पर टैप करके स्टेटस बदलें: <b>Start ➔ Cooking ➔ Ready</b>
+        </p>
+      </div>
+      <div id="kitchenKotGrid" class="kds-grid"></div>
+    </section>
+    <!-- 3. MANAGER WORKSPACE -->
+    <section id="panel-MANAGER" class="role-panel hidden waiter-layout">
+      <div>
+        <div class="card">
+          <div class="sec-head">
+            <div class="sec-title">🧾 Running Table Bills (5% GST Included)</div>
+          </div>
+          <div id="managerBillingList"></div>
+        </div>
+        <div class="card">
+          <div class="sec-head">
+            <div class="sec-title">✅ Today's Settled Bills</div>
+          </div>
+          <div id="managerCompletedOrders"></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <div class="sec-head">
+            <div class="sec-title">🍲 Add New Menu Dish</div>
+          </div>
+          <input id="newDishName" type="text" placeholder="Dish Name (e.g. Cheese Butter Masala)" class="search-box">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <input id="newDishCat" type="text" placeholder="Category (Main / Bread)" class="search-box">
+            <input id="newDishPrice" type="number" placeholder="Price (₹)" class="search-box">
+          </div>
+          <button onclick="addMenuItem()" class="btn-kot-send" style="width:100%; padding:13px;">+ Save Dish to Menu</button>
+        </div>
+        <div class="card" style="background:var(--dark); color:#fff;">
+          <div class="sec-head">
+            <div class="sec-title" style="color:#fbbf24;">☁️ Offline Queue & UUID Sync Log</div>
+            <button onclick="forceCloudSync()" class="kds-btn" style="background:var(--green); color:#fff; padding:6px 12px;">Sync All</button>
+          </div>
+          <div id="managerSyncLog" style="font-family:monospace; font-size:11px; max-height:220px; overflow-y:auto;"></div>
+        </div>
+      </div>
+    </section>
+    <!-- 4. SUPER ADMIN WORKSPACE -->
+    <section id="panel-ADMIN" class="role-panel hidden waiter-layout">
+      <div class="card">
+        <div class="sec-head">
+          <div class="sec-title">🛡️ Onboard New Restaurant (SaaS Admin)</div>
+        </div>
+        <input id="adminRestName" type="text" placeholder="Restaurant Name" class="search-box">
+        <input id="adminRestCity" type="text" placeholder="City / Location (e.g. Akola)" class="search-box">
+        <input id="adminRestTables" type="number" value="6" placeholder="Total Tables" class="search-box">
+        <button onclick="createNewRestaurant()" class="btn-kot-send" style="width:100%; padding:13px;">➕ Create Restaurant Tenant</button>
+        <button onclick="resetDemoData()" class="kds-btn" style="width:100%; margin-top:10px; background:#fee2e2; color:#b91c1c;">🔄 Reset All Demo Data</button>
+      </div>
+      <div class="card">
+        <div class="sec-head">
+          <div class="sec-title">🏢 Registered Restaurants</div>
+        </div>
+        <div id="adminRestaurantList"></div>
+      </div>
+    </section>
+  </main>
+  <!-- ================= BOTTOM MOBILE APP NAVIGATION ================= -->
+  <nav class="bottom-dock">
+    <button onclick="switchRole('WAITER')" id="tab-WAITER" class="nav-item active">
+      <span class="nav-icon">👨‍🍳</span>
+      <span>Waiter</span>
+    </button>
+    <button onclick="switchRole('KITCHEN')" id="tab-KITCHEN" class="nav-item">
+      <span class="nav-icon">🔥</span>
+      <span>Kitchen</span>
+      <span id="kitchenBadge" class="nav-badge hidden">0</span>
+    </button>
+    <button onclick="switchRole('MANAGER')" id="tab-MANAGER" class="nav-item">
+      <span class="nav-icon">🧾</span>
+      <span>Manager</span>
+    </button>
+    <button onclick="switchRole('ADMIN')" id="tab-ADMIN" class="nav-item">
+      <span class="nav-icon">🛡️</span>
+      <span>Admin</span>
+    </button>
+  </nav>
+  <!-- ================= JAVASCRIPT LOGIC ================= -->
+  <script>
+    const STORAGE_KEY = 'POSHUB_PRO_OFFLINE_DB_V3';
+    const lanBus = ('BroadcastChannel' in window) ? new BroadcastChannel('poshub_wifi_sync') : null;
+    let state = {
+      currentRole: 'WAITER',
+      waiterSubTab: 'ORDER', // 'ORDER' or 'KOT'
+      activeRestaurantId: 'rest_1',
+      selectedTable: 'Table 1',
+      selectedCategory: 'All',
+      isOnline: true,
+      cart: {},
+      db: null
+    };
+    function uuid() {
+      return 'id-' + Math.random().toString(36).substring(2, 8) + '-' + Date.now().toString(36);
+    }
+    function playBeep(freq = 680) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.16);
+      } catch (e) {}
+    }
+    function showToast(msg) {
+      const box = document.getElementById('toastContainer');
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.innerText = msg;
+      box.appendChild(el);
+      setTimeout(() => el.remove(), 2500);
+    }
+    function getSeedData() {
+      return {
+        restaurants: [
+          { id: 'rest_1', name: 'Swad Family Restaurant', city: 'Akola Main', tablesCount: 6, is_synced: true },
+          { id: 'rest_2', name: 'Spice Garden Dhaba', city: 'Highway', tablesCount: 6, is_synced: true }
+        ],
+        menus: [
+          { id: 'm1', restaurant_id: 'rest_1', name: 'Paneer Butter Masala', category: 'Main Course', price: 220, is_synced: true },
+          { id: 'm2', restaurant_id: 'rest_1', name: 'Butter Garlic Naan', category: 'Breads', price: 45, is_synced: true },
+          { id: 'm3', restaurant_id: 'rest_1', name: 'Hyderabadi Veg Biryani', category: 'Rice', price: 190, is_synced: true },
+          { id: 'm4', restaurant_id: 'rest_1', name: 'Crispy Masala Papad', category: 'Starters', price: 40, is_synced: true },
+          { id: 'm5', restaurant_id: 'rest_1', name: 'Paneer Chilli Dry', category: 'Starters', price: 180, is_synced: true },
+          { id: 'm6', restaurant_id: 'rest_1', name: 'Dal Tadka Special', category: 'Main Course', price: 160, is_synced: true },
+          { id: 'm7', restaurant_id: 'rest_1', name: 'Tandoori Wheat Roti', category: 'Breads', price: 20, is_synced: true },
+          { id: 'm8', restaurant_id: 'rest_2', name: 'Saoji Shev Bhaji', category: 'Main Course', price: 150, is_synced: true },
+          { id: 'm9', restaurant_id: 'rest_2', name: 'Garama Garam Jowar Bhakri', category: 'Breads', price: 25, is_synced: true }
+        ],
+        kots: [
+          {
+            id: 'kot_init_1',
+            token_no: 101,
+            restaurant_id: 'rest_1',
+            table_name: 'Table 2',
+            status: 'COOKING',
+            note: 'Less Spicy',
+            items: [
+              { name: 'Paneer Butter Masala', price: 220, qty: 1 },
+              { name: 'Butter Garlic Naan', price: 45, qty: 2 }
+            ],
+            created_at: '12:40 PM',
+            is_synced: true
+          }
+        ],
+        completed_orders: []
+      };
+    }
+    function loadDB() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      state.db = saved ? JSON.parse(saved) : getSeedData();
+    }
+    function saveDB(broadcast = true) {
+      if (state.isOnline) {
+        state.db.kots.forEach(k => k.is_synced = true);
+        state.db.completed_orders.forEach(o => o.is_synced = true);
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.db));
+      if (broadcast && lanBus) lanBus.postMessage({ type: 'SYNC' });
+      renderAll();
+    }
+    if (lanBus) {
+      lanBus.onmessage = () => {
+        loadDB();
+        playBeep(760);
+        showToast('⚡ Live Wi-Fi Update Received!');
+        renderAll();
+      };
+    }
+    function switchRole(role) {
+      state.currentRole = role;
+      document.querySelectorAll('.role-panel').forEach(p => p.classList.add('hidden'));
+      document.getElementById('panel-' + role).classList.remove('hidden');
+      document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+      document.getElementById('tab-' + role).classList.add('active');
+      renderAll();
+    }
+    function switchWaiterSubTab(sub) {
+      state.waiterSubTab = sub;
+      document.getElementById('subTabOrder').classList.toggle('active', sub === 'ORDER');
+      document.getElementById('subTabKot').classList.toggle('active', sub === 'KOT');
+      document.getElementById('waiterOrderCol').classList.toggle('hidden', sub !== 'ORDER');
+      document.getElementById('waiterKotCol').classList.toggle('hidden', sub !== 'KOT');
+    }
+    function switchRestaurant(id) {
+      state.activeRestaurantId = id;
+      state.selectedTable = 'Table 1';
+      state.selectedCategory = 'All';
+      state.cart = {};
+      renderAll();
+      showToast('🏢 Restaurant Switched!');
+    }
+    function toggleNetworkMode() {
+      state.isOnline = !state.isOnline;
+      if (state.isOnline) {
+        showToast('🌐 ONLINE: Auto-Syncing Offline Queue...');
+        saveDB(true);
+      } else {
+        showToast('📡 OFFLINE Mode: Running on Local Wi-Fi!');
+        renderAll();
+      }
+    }
+    function forceCloudSync() {
+      state.db.kots.forEach(k => k.is_synced = true);
+      state.db.completed_orders.forEach(o => o.is_synced = true);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.db));
+      showToast('☁️ All Records Synced to Cloud!');
+      renderAll();
+    }
+    function selectTable(tName) {
+      state.selectedTable = tName;
+      document.getElementById('selectedTableLabel').innerText = '(' + tName + ')';
+      renderWaiterTables();
+      renderFloatingCart();
+    }
+    function selectCategory(cat) {
+      state.selectedCategory = cat;
+      renderCategories();
+      renderWaiterMenu();
+    }
+    function updateCart(menuId, delta) {
+      const next = (state.cart[menuId] || 0) + delta;
+      if (next <= 0) delete state.cart[menuId];
+      else state.cart[menuId] = next;
+      renderWaiterMenu();
+      renderFloatingCart();
+    }
+    function confirmKOT() {
+      const keys = Object.keys(state.cart);
+      if (!keys.length) return;
+      const menus = state.db.menus.filter(m => m.restaurant_id === state.activeRestaurantId);
+      const items = keys.map(id => {
+        const d = menus.find(m => m.id === id);
+        return { name: d.name, price: d.price, qty: state.cart[id] };
+      });
+      const noteEl = document.getElementById('kotSpecialNote');
+      const tokenNo = 101 + state.db.kots.filter(k => k.restaurant_id === state.activeRestaurantId).length;
+      state.db.kots.unshift({
+        id: uuid(),
+        token_no: tokenNo,
+        restaurant_id: state.activeRestaurantId,
+        table_name: state.selectedTable,
+        status: 'CREATED',
+        note: noteEl.value.trim(),
+        items,
+        created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        is_synced: state.isOnline
+      });
+      state.cart = {};
+      noteEl.value = '';
+      playBeep(540);
+      showToast('🚀 KOT #' + tokenNo + ' sent to Kitchen!');
+      saveDB(true);
+      switchWaiterSubTab('KOT'); // मोबाइल पर तुरंत लाइव स्टेटस दिखाएं
+    }
+    function changeKotStatus(kotId, newStatus) {
+      const kot = state.db.kots.find(k => k.id === kotId);
+      if (!kot) return;
+      kot.status = newStatus;
+      kot.is_synced = state.isOnline;
+      playBeep(880);
+      showToast('🔥 KOT #' + kot.token_no + ' ➔ ' + newStatus.replace('_', ' '));
+      saveDB(true);
+    }
+    function settleTableBill(tableName, mode) {
+      const kots = state.db.kots.filter(
+        k => k.restaurant_id === state.activeRestaurantId && k.table_name === tableName && k.status !== 'BILLED'
+      );
+      if (!kots.length) return;
+      let sub = 0;
+      const summary = [];
+      kots.forEach(k => {
+        k.items.forEach(i => {
+          sub += i.price * i.qty;
+          summary.push(i.name + ' x' + i.qty);
+        });
+        k.status = 'BILLED';
+        k.is_synced = state.isOnline;
+      });
+      const grand = Math.round(sub * 1.05);
+      state.db.completed_orders.unshift({
+        id: uuid(),
+        restaurant_id: state.activeRestaurantId,
+        table_name: tableName,
+        summary: summary.join(', '),
+        grand_total: grand,
+        payment_mode: mode,
+        is_synced: state.isOnline
+      });
+      showToast('✅ ' + tableName + ' Bill Paid (₹' + grand + ')');
+      saveDB(true);
+    }
+    function addMenuItem() {
+      const name = document.getElementById('newDishName').value.trim();
+      const category = document.getElementById('newDishCat').value.trim() || 'Specials';
+      const price = parseFloat(document.getElementById('newDishPrice').value);
+      if (!name || !price) return;
+      state.db.menus.push({
+        id: uuid(),
+        restaurant_id: state.activeRestaurantId,
+        name,
+        category,
+        price,
+        is_synced: state.isOnline
+      });
+      document.getElementById('newDishName').value = '';
+      document.getElementById('newDishPrice').value = '';
+      showToast('🍲 Dish Added to Menu!');
+      saveDB(true);
+    }
+    function createNewRestaurant() {
+      const name = document.getElementById('adminRestName').value.trim();
+      const city = document.getElementById('adminRestCity').value.trim() || 'Main';
+      const tablesCount = parseInt(document.getElementById('adminRestTables').value) || 6;
+      if (!name) return;
+      const id = uuid();
+      state.db.restaurants.push({ id, name, city, tablesCount, is_synced: state.isOnline });
+      state.db.menus.push({ id: uuid(), restaurant_id: id, name: 'Special Veg Thali', category: 'Main Course', price: 180, is_synced: state.isOnline });
+      state.activeRestaurantId = id;
+      document.getElementById('adminRestName').value = '';
+      showToast('🏢 New Restaurant Tenant Created!');
+      saveDB(true);
+    }
+    function resetDemoData() {
+      localStorage.removeItem(STORAGE_KEY);
+      loadDB();
+      renderAll();
+      showToast('🔄 Demo Database Reset!');
+    }
+    // ================= UI RENDERING =================
+    function renderAll() {
+      // Topbar
+      document.getElementById('restaurantSelect').innerHTML = state.db.restaurants.map(r =>
+        `<option value="${r.id}" ${r.id === state.activeRestaurantId ? 'selected' : ''}>${r.name}</option>`
+      ).join('');
+      const unsynced = state.db.kots.filter(k => !k.is_synced).length + state.db.completed_orders.filter(o => !o.is_synced).length;
+      document.getElementById('syncCountBadge').innerText = unsynced;
+      const netBtn = document.getElementById('networkToggleBtn');
+      netBtn.className = 'net-pill ' + (state.isOnline ? 'online' : 'offline');
+      document.getElementById('netText').innerText = state.isOnline ? 'ONLINE' : 'LOCAL WI-FI';
+      // Badges
+      const activeKots = state.db.kots.filter(k => k.restaurant_id === state.activeRestaurantId && k.status !== 'BILLED');
+      document.getElementById('mobileKotCount').innerText = activeKots.length;
+      const kPending = activeKots.filter(k => k.status !== 'SERVED').length;
+      const kBadge = document.getElementById('kitchenBadge');
+      kBadge.innerText = kPending;
+      kBadge.classList.toggle('hidden', kPending === 0);
+      renderWaiterTables();
+      renderCategories();
+      renderWaiterMenu();
+      renderFloatingCart();
+      renderWaiterLiveKots();
+      renderKitchenKDS();
+      renderManagerPanel();
+      renderAdminPanel();
+    }
+    function renderWaiterTables() {
+      const rest = state.db.restaurants.find(r => r.id === state.activeRestaurantId);
+      const count = rest ? rest.tablesCount : 6;
+      let html = '';
+      for (let i = 1; i <= count; i++) {
+        const tName = 'Table ' + i;
+        const occupied = state.db.kots.some(
+          k => k.restaurant_id === state.activeRestaurantId && k.table_name === tName && k.status !== 'BILLED'
+        );
+        const selected = state.selectedTable === tName;
+        html += `
+          <button onclick="selectTable('${tName}')" class="t-card ${selected ? 'selected' : occupied ? 'occupied' : ''}">
+            <span class="t-name">${tName}</span>
+            <span class="t-status" style="color:${occupied ? '#d97706' : '#059669'}">
+              ${occupied ? '🟠 Running' : '🟢 Vacant'}
+            </span>
+          </button>
+        `;
+      }
+      document.getElementById('waiterTableGrid').innerHTML = html;
+    }
+    function renderCategories() {
+      const menus = state.db.menus.filter(m => m.restaurant_id === state.activeRestaurantId);
+      const cats = ['All', ...new Set(menus.map(m => m.category || 'General'))];
+      document.getElementById('categoryScroll').innerHTML = cats.map(c => `
+        <button onclick="selectCategory('${c}')" class="cat-chip ${state.selectedCategory === c ? 'active' : ''}">${c}</button>
+      `).join('');
+    }
+    function renderWaiterMenu() {
+      const q = (document.getElementById('menuSearchInput')?.value || '').toLowerCase();
+      const items = state.db.menus.filter(m => {
+        const matchRest = m.restaurant_id === state.activeRestaurantId;
+        const matchCat = state.selectedCategory === 'All' || (m.category || 'General') === state.selectedCategory;
+        const matchQ = m.name.toLowerCase().includes(q);
+        return matchRest && matchCat && matchQ;
+      });
+      document.getElementById('waiterMenuGrid').innerHTML = items.map(item => {
+        const qty = state.cart[item.id] || 0;
+        return `
+          <div class="dish-card ${qty > 0 ? 'active' : ''}">
+            <div>
+              <div class="dish-title"><span class="veg-dot"></span>${item.name}</div>
+              <div class="dish-price">₹${item.price}</div>
+            </div>
+            <div class="qty-box">
+              ${qty > 0 ? `
+                <button onclick="updateCart('${item.id}', -1)" class="q-btn q-minus">−</button>
+                <span class="q-num">${qty}</span>
+              ` : ''}
+              <button onclick="updateCart('${item.id}', 1)" class="q-btn q-plus">+</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    function renderFloatingCart() {
+      const bar = document.getElementById('floatingCartBar');
+      const keys = Object.keys(state.cart);
+      if (!keys.length || state.currentRole !== 'WAITER') {
+        bar.classList.add('hidden');
+        return;
+      }
+      bar.classList.remove('hidden');
+      const menus = state.db.menus.filter(m => m.restaurant_id === state.activeRestaurantId);
+      let totalQty = 0;
+      let totalPrice = 0;
+      const names = [];
+      keys.forEach(id => {
+        const d = menus.find(m => m.id === id);
+        if (d) {
+          totalQty += state.cart[id];
+          totalPrice += d.price * state.cart[id];
+          names.push(`${d.name} x${state.cart[id]}`);
+        }
+      });
+      document.getElementById('cartSummaryTitle').innerText = `${state.selectedTable} • ${totalQty} Items | ₹${totalPrice}`;
+      document.getElementById('cartItemsPreview').innerText = names.join(', ');
+    }
+    function getStepProgressHTML(status) {
+      const steps = ['CREATED', 'COOKING_STARTED', 'COOKING', 'READY'];
+      const idx = status === 'SERVED' ? 4 : steps.indexOf(status);
+      return `
+        <div class="progress-track">
+          ${steps.map((s, i) => `<div class="prog-step ${i < idx ? 'done' : i === idx ? 'active' : ''}"></div>`).join('')}
+        </div>
+      `;
+    }
+    function renderWaiterLiveKots() {
+      const kots = state.db.kots.filter(k => k.restaurant_id === state.activeRestaurantId && k.status !== 'BILLED');
+      const box = document.getElementById('waiterLiveKotList');
+      if (!kots.length) {
+        box.innerHTML = `<div style="text-align:center; color:var(--muted); padding:30px; font-size:13px;">कोई एक्टिव KOT नहीं है।</div>`;
+        return;
+      }
+      box.innerHTML = kots.map(k => `
+        <div class="kot-ticket ${k.status}">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <strong style="font-size:15px;">${k.table_name}</strong>
+              <span style="font-size:12px; color:var(--muted); margin-left:6px; font-weight:700;">#KOT-${k.token_no}</span>
+            </div>
+            <span class="badge-status st-${k.status}">${k.status.replace('_', ' ')}</span>
+          </div>
+          ${getStepProgressHTML(k.status)}
+          <div style="font-size:13px; font-weight:700; margin-bottom:8px;">
+            ${k.items.map(i => `<div style="padding:2px 0;">• ${i.name} <span style="color:var(--primary);">×${i.qty}</span></div>`).join('')}
+            ${k.note ? `<div style="color:var(--red); font-size:11px; margin-top:4px;">📝 Note: ${k.note}</div>` : ''}
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--muted); border-top:1px solid var(--border); padding-top:8px;">
+            <span>${k.is_synced ? '✔ Cloud Synced' : '📡 Local Wi-Fi'} • ${k.created_at}</span>
+            ${k.status === 'READY' ? `<button onclick="changeKotStatus('${k.id}', 'SERVED')" class="kds-btn" style="background:var(--green); color:#fff; padding:6px 12px;">✅ Mark Served</button>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+    function renderKitchenKDS() {
+      const kots = state.db.kots.filter(
+        k => k.restaurant_id === state.activeRestaurantId && !['SERVED', 'BILLED'].includes(k.status)
+      );
+      const grid = document.getElementById('kitchenKotGrid');
+      if (!kots.length) {
+        grid.innerHTML = `<div class="card" style="text-align:center; padding:40px; color:var(--muted); font-weight:700;">🎉 All Caught Up! No Pending KOTs in Kitchen.</div>`;
+        return;
+      }
+      grid.innerHTML = kots.map(k => `
+        <div class="kot-ticket ${k.status}">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div>
+              <span style="font-size:18px; font-weight:900;">${k.table_name}</span>
+              <span style="font-size:12px; font-weight:800; background:#f1f5f9; padding:3px 8px; border-radius:6px; margin-left:6px;">#${k.token_no}</span>
+            </div>
+            <span class="badge-status st-${k.status}">${k.status.replace('_', ' ')}</span>
+          </div>
+          <div style="margin-bottom:10px;">
+            ${k.items.map(i => `
+              <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #f1f5f9; font-size:14px; font-weight:800;">
+                <span>${i.name}</span>
+                <span style="background:var(--dark); color:#fff; padding:2px 8px; border-radius:6px; font-size:12px;">×${i.qty}</span>
+              </div>
+            `).join('')}
+          </div>
+          ${k.note ? `<div style="background:#fef2f2; color:var(--red); padding:7px 10px; border-radius:8px; font-size:12px; font-weight:800;">⚠️ Chef Note: ${k.note}</div>` : ''}
+          <div class="kds-btn-group">
+            <button onclick="changeKotStatus('${k.id}', 'COOKING_STARTED')" class="kds-btn" style="background:var(--amber-soft); color:#92400e;">1. Start</button>
+            <button onclick="changeKotStatus('${k.id}', 'COOKING')" class="kds-btn" style="background:var(--blue-soft); color:#1e40af;">2. Cooking</button>
+            <button onclick="changeKotStatus('${k.id}', 'READY')" class="kds-btn" style="background:var(--green); color:#fff;">3. Ready 🔔</button>
+          </div>
+        </div>
+      `).join('');
+    }
+    function renderManagerPanel() {
+      const activeKots = state.db.kots.filter(k => k.restaurant_id === state.activeRestaurantId && k.status !== 'BILLED');
+      const grouped = {};
+      activeKots.forEach(k => {
+        if (!grouped[k.table_name]) grouped[k.table_name] = [];
+        grouped[k.table_name].push(k);
+      });
+      const tables = Object.keys(grouped);
+      const billBox = document.getElementById('managerBillingList');
+      if (!tables.length) {
+        billBox.innerHTML = `<div style="color:var(--muted); font-size:13px;">अभी किसी टेबल पर बिल बकाया नहीं है।</div>`;
+      } else {
+        billBox.innerHTML = tables.map(tName => {
+          let sub = 0;
+          const rows = [];
+          grouped[tName].forEach(k => {
+            k.items.forEach(i => {
+              sub += i.price * i.qty;
+              rows.push(`<div style="display:flex; justify-content:space-between; font-size:13px; padding:3px 0;"><span>${i.name} × ${i.qty}</span><strong>₹${i.price * i.qty}</strong></div>`);
+            });
+          });
+          const grand = Math.round(sub * 1.05);
+          return `
+            <div class="kot-ticket">
+              <div style="display:flex; justify-content:space-between; border-bottom:1px solid var(--border); padding-bottom:8px; margin-bottom:8px;">
+                <strong style="font-size:15px;">${tName}</strong>
+                <strong style="color:var(--primary); font-size:15px;">Total: ₹${grand}</strong>
+              </div>
+              <div style="margin-bottom:12px;">${rows.join('')}</div>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <button onclick="settleTableBill('${tName}', 'CASH')" class="kds-btn" style="background:var(--green); color:#fff;">💵 Cash Settle</button>
+                <button onclick="settleTableBill('${tName}', 'UPI')" class="kds-btn" style="background:var(--blue); color:#fff;">📱 UPI Settle</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+      const orders = state.db.completed_orders.filter(o => o.restaurant_id === state.activeRestaurantId);
+      document.getElementById('managerCompletedOrders').innerHTML = orders.length
+        ? orders.map(o => `<div style="display:flex; justify-content:space-between; font-size:13px; padding:8px 0; border-bottom:1px solid var(--border);"><span><strong>${o.table_name}</strong> (${o.payment_mode})</span><strong style="color:var(--green);">₹${o.grand_total}</strong></div>`).join('')
+        : `<div style="font-size:12px; color:var(--muted);">No completed bills yet.</div>`;
+      document.getElementById('managerSyncLog').innerHTML = state.db.kots.map(k =>
+        `<div style="padding:5px 0; border-bottom:1px solid #334155; display:flex; justify-content:space-between;">
+          <span>[KOT #${k.token_no}] ${k.id}</span>
+          <span style="color:${k.is_synced ? '#34d399' : '#fbbf24'}">${k.is_synced ? '✔ SYNCED' : '⏳ QUEUED'}</span>
+        </div>`
+      ).join('');
+    }
+    function renderAdminPanel() {
+      document.getElementById('adminRestaurantList').innerHTML = state.db.restaurants.map(r => `
+        <div class="kot-ticket" style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <strong style="font-size:14px;">${r.name}</strong>
+            <div style="font-size:12px; color:var(--muted);">${r.city} • ${r.tablesCount} Tables</div>
+          </div>
+          <button onclick="switchRestaurant('${r.id}'); switchRole('WAITER');" class="kds-btn" style="background:var(--dark); color:#fff; padding:8px 14px;">Open POS</button>
+        </div>
+      `).join('');
+    }
+    loadDB();
+    renderAll();
+  </script>
+</body>
+</html>

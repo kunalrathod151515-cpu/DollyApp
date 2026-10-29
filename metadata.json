@@ -1,0 +1,6 @@
+{
+  "name": "POSHub Pro - Restaurant KOT & Billing",
+  "description": "Multi-tenant restaurant POS system featuring live KOT order punch, Kitchen Display System (KDS), manager billing with GST, and SaaS administration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

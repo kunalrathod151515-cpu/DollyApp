@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "Restaurant": {
+      "title": "Restaurant",
+      "description": "A restaurant tenant in the multi-restaurant POS system.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "name": { "type": "string", "maxLength": 100, "description": "Restaurant outlet name" },
+        "city": { "type": "string", "maxLength": 100, "description": "City or branch location" },
+        "tablesCount": { "type": "number", "description": "Total number of dining tables" },
+        "is_synced": { "type": "boolean", "description": "Cloud synchronization flag" }
+      },
+      "required": ["id", "name", "city", "tablesCount"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "A food dish or beverage in the restaurant menu.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "restaurant_id": { "type": "string", "description": "Associated restaurant ID" },
+        "name": { "type": "string", "maxLength": 120, "description": "Dish title" },
+        "category": { "type": "string", "maxLength": 50, "description": "Category e.g. Main Course, Breads" },
+        "price": { "type": "number", "description": "Dish price in INR" },
+        "is_synced": { "type": "boolean", "description": "Cloud synchronization flag" }
+      },
+      "required": ["id", "restaurant_id", "name", "category", "price"]
+    },
+    "KOT": {
+      "title": "KOT",
+      "description": "Kitchen Order Ticket for live kitchen display and table billing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "token_no": { "type": "number", "description": "Sequential order token number" },
+        "restaurant_id": { "type": "string", "description": "Associated restaurant ID" },
+        "table_name": { "type": "string", "maxLength": 50, "description": "Table identifier" },
+        "status": {
+          "type": "string",
+          "enum": ["CREATED", "COOKING_STARTED", "COOKING", "READY", "SERVED", "BILLED"],
+          "description": "Order progression status"
+        },
+        "note": { "type": "string", "maxLength": 200, "description": "Chef instructions" },
+        "created_at": { "type": "string", "description": "Timestamp string" },
+        "waiter_name": { "type": "string", "maxLength": 100, "description": "Name of waiter who punched order" },
+        "is_synced": { "type": "boolean", "description": "Cloud synchronization flag" }
+      },
+      "required": ["id", "token_no", "restaurant_id", "table_name", "status"]
+    },
+    "CompletedOrder": {
+      "title": "CompletedOrder",
+      "description": "Settled bill history record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "restaurant_id": { "type": "string", "description": "Associated restaurant ID" },
+        "table_name": { "type": "string", "maxLength": 50, "description": "Table identifier" },
+        "summary": { "type": "string", "maxLength": 500, "description": "Summary of settled items" },
+        "grand_total": { "type": "number", "description": "Total amount including GST" },
+        "payment_mode": { "type": "string", "enum": ["CASH", "UPI"], "description": "Payment mode" },
+        "is_synced": { "type": "boolean", "description": "Cloud synchronization flag" },
+        "date": { "type": "string", "description": "Date or time of settlement" }
+      },
+      "required": ["id", "restaurant_id", "table_name", "grand_total", "payment_mode"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "Staff account authorized and created by Admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "name": { "type": "string", "maxLength": 100, "description": "Full staff name" },
+        "username": { "type": "string", "maxLength": 50, "description": "Login username or staff ID" },
+        "pinOrPass": { "type": "string", "maxLength": 60, "description": "Login password or PIN" },
+        "role": { "type": "string", "enum": ["ADMIN", "MANAGER", "WAITER", "KITCHEN"], "description": "Assigned staff role" },
+        "restaurant_id": { "type": "string", "description": "Assigned restaurant or 'all'" },
+        "is_active": { "type": "boolean", "description": "Whether account is currently enabled" }
+      },
+      "required": ["id", "name", "username", "pinOrPass", "role", "restaurant_id", "is_active"]
+    }
+  },
+  "firestore": {
+    "/restaurants/{restaurantId}": {
+      "schema": { "$ref": "#/entities/Restaurant" },
+      "description": "Tenant restaurant records"
+    },
+    "/menus/{menuId}": {
+      "schema": { "$ref": "#/entities/MenuItem" },
+      "description": "Restaurant dishes and drinks"
+    },
+    "/kots/{kotId}": {
+      "schema": { "$ref": "#/entities/KOT" },
+      "description": "Active and past kitchen order tickets"
+    },
+    "/completed_orders/{orderId}": {
+      "schema": { "$ref": "#/entities/CompletedOrder" },
+      "description": "Settled bills and receipts"
+    },
+    "/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffUser" },
+      "description": "Admin authorized staff credentials"
+    }
+  }
+}
