@@ -9,6 +9,19 @@
         "name": { "type": "string", "maxLength": 100, "description": "Restaurant outlet name" },
         "city": { "type": "string", "maxLength": 100, "description": "City or branch location" },
         "tablesCount": { "type": "number", "description": "Total number of dining tables" },
+        "tables": {
+          "type": "array",
+          "description": "Configured dining tables for the restaurant",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "capacity": { "type": "number" }
+            },
+            "required": ["id", "name"]
+          }
+        },
         "is_synced": { "type": "boolean", "description": "Cloud synchronization flag" }
       },
       "required": ["id", "name", "city", "tablesCount"]

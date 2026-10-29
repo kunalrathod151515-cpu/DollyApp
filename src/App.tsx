@@ -30,7 +30,9 @@ import {
   Wifi,
   WifiOff,
   Download,
-  AlertTriangle
+  AlertTriangle,
+  LayoutGrid,
+  ArrowLeft
 } from 'lucide-react';
 
 import {
@@ -60,11 +62,18 @@ export interface StaffUser {
   is_active: boolean;
 }
 
+export interface RestaurantTable {
+  id: string;
+  name: string;
+  capacity?: number;
+}
+
 interface Restaurant {
   id: string;
   name: string;
   city: string;
   tablesCount: number;
+  tables?: RestaurantTable[];
   is_synced: boolean;
 }
 
@@ -151,8 +160,36 @@ const INITIAL_STAFF: StaffUser[] = [
 ];
 
 const INITIAL_RESTAURANTS: Restaurant[] = [
-  { id: 'rest_1', name: 'Swad Family Restaurant', city: 'Akola Main', tablesCount: 6, is_synced: true },
-  { id: 'rest_2', name: 'Spice Garden Dhaba', city: 'Highway', tablesCount: 6, is_synced: true }
+  {
+    id: 'rest_1',
+    name: 'Swad Family Restaurant',
+    city: 'Akola Main',
+    tablesCount: 6,
+    tables: [
+      { id: 't1_1', name: 'Table 1', capacity: 4 },
+      { id: 't1_2', name: 'Table 2', capacity: 2 },
+      { id: 't1_3', name: 'Table 3', capacity: 4 },
+      { id: 't1_4', name: 'Table 4', capacity: 6 },
+      { id: 't1_5', name: 'Table 5', capacity: 4 },
+      { id: 't1_6', name: 'Table 6', capacity: 8 }
+    ],
+    is_synced: true
+  },
+  {
+    id: 'rest_2',
+    name: 'Spice Garden Dhaba',
+    city: 'Highway',
+    tablesCount: 6,
+    tables: [
+      { id: 't2_1', name: 'Dhaba 1', capacity: 4 },
+      { id: 't2_2', name: 'Dhaba 2', capacity: 4 },
+      { id: 't2_3', name: 'Dhaba 3', capacity: 6 },
+      { id: 't2_4', name: 'Dhaba 4', capacity: 6 },
+      { id: 't2_5', name: 'Dhaba 5', capacity: 8 },
+      { id: 't2_6', name: 'Dhaba 6', capacity: 10 }
+    ],
+    is_synced: true
+  }
 ];
 
 const INITIAL_MENUS: MenuItem[] = [
@@ -264,17 +301,19 @@ export default function App() {
   const [currentRole, setCurrentRole] = useState<UserRole>('WAITER');
   const [waiterSubTab, setWaiterSubTab] = useState<'ORDER' | 'KOT'>('ORDER');
   const [activeRestaurantId, setActiveRestaurantId] = useState<string>('rest_1');
-  const [selectedTable, setSelectedTable] = useState<string>('Table 1');
+  const [selectedTable, setSelectedTable] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [cart, setCart] = useState<{ [menuId: string]: number }>({});
   const [chefNote, setChefNote] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [toasts, setToasts] = useState<{ id: string; msg: string }[]>([]);
 
-  // Manager inputs
+  // Manager inputs for Menu & Tables
   const [newDishName, setNewDishName] = useState('');
   const [newDishCat, setNewDishCat] = useState('');
   const [newDishPrice, setNewDishPrice] = useState('');
+  const [newTableName, setNewTableName] = useState('');
+  const [newTableCapacity, setNewTableCapacity] = useState('4');
 
   // Admin restaurant inputs
   const [adminRestName, setAdminRestName] = useState('');
@@ -495,6 +534,7 @@ export default function App() {
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setSelectedTable('');
     setCart({});
     setChefNote('');
     showToast('🔒 Logged out successfully');
@@ -506,6 +546,25 @@ export default function App() {
       restaurants[0] || { id: 'rest_1', name: 'Restaurant', city: 'City', tablesCount: 6, is_synced: true }
     );
   }, [restaurants, activeRestaurantId]);
+
+  const currentRestaurantTables = useMemo<RestaurantTable[]>(() => {
+    if (activeRestaurant.tables && activeRestaurant.tables.length > 0) {
+      return activeRestaurant.tables;
+    }
+    const count = activeRestaurant.tablesCount || 6;
+    return Array.from({ length: count }).map((_, i) => ({
+      id: `auto_t_${i + 1}`,
+      name: `Table ${i + 1}`,
+      capacity: 4
+    }));
+  }, [activeRestaurant]);
+
+  // Reset table and cart when restaurant changes
+  useEffect(() => {
+    setSelectedTable('');
+    setCart({});
+    setChefNote('');
+  }, [activeRestaurantId]);
 
   const currentRestaurantMenus = useMemo(() => {
     return menus.filter((m) => m.restaurant_id === activeRestaurantId);
@@ -532,8 +591,13 @@ export default function App() {
     return activeKots.filter((k) => !['SERVED', 'BILLED'].includes(k.status));
   }, [activeKots]);
 
-  // Cart operations
+  // Cart operations (enforcing table selection first)
   const updateCart = (menuId: string, delta: number) => {
+    if (!selectedTable && delta > 0) {
+      showToast('⚠️ Please select a dining table first before choosing menu items!');
+      playAudioBeep(420);
+      return;
+    }
     setCart((prev) => {
       const nextVal = (prev[menuId] || 0) + delta;
       const copy = { ...prev };
@@ -567,7 +631,15 @@ export default function App() {
 
   // Confirm KOT (Works Offline and Online via Firestore local persistence)
   const confirmKOT = async () => {
-    if (!cartKeys.length) return;
+    if (!selectedTable) {
+      showToast('⚠️ Please select a dining table first before sending KOT!');
+      return;
+    }
+    if (!cartKeys.length) {
+      showToast('⚠️ Please select menu items to include in this order!');
+      return;
+    }
+    const sentTableName = selectedTable;
     const items: KotItem[] = cartKeys.map((id) => {
       const d = currentRestaurantMenus.find((m) => m.id === id)!;
       return { name: d.name, price: d.price, qty: cart[id] };
@@ -579,7 +651,7 @@ export default function App() {
       id: kotId,
       token_no: tokenNo,
       restaurant_id: activeRestaurantId,
-      table_name: selectedTable,
+      table_name: sentTableName,
       status: 'CREATED',
       note: chefNote.trim(),
       items,
@@ -594,8 +666,9 @@ export default function App() {
     saveLocalState('kots', nextKots);
     setCart({});
     setChefNote('');
+    setSelectedTable(''); // Directs waiter right back to select table for next customer!
     playAudioBeep(540);
-    showToast(isOnline ? `🚀 KOT #${tokenNo} sent to Kitchen!` : `💾 KOT #${tokenNo} saved locally (Offline)`);
+    showToast(isOnline ? `🚀 KOT #${tokenNo} for ${sentTableName} sent to Kitchen!` : `💾 KOT #${tokenNo} for ${sentTableName} saved locally (Offline)`);
     setWaiterSubTab('KOT');
 
     if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
@@ -716,18 +789,105 @@ export default function App() {
     }
   };
 
+  // Manager: Add dining table
+  const handleAddTable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newTableName.trim();
+    if (!trimmed) {
+      showToast('⚠️ Please enter a table name or number (e.g. Table 7 or VIP-1)');
+      return;
+    }
+
+    if (currentRestaurantTables.some((t) => t.name.toLowerCase() === trimmed.toLowerCase())) {
+      showToast(`⚠️ Table "${trimmed}" already exists in this restaurant!`);
+      return;
+    }
+
+    const cap = parseInt(newTableCapacity, 10) || 4;
+    const newTbl: RestaurantTable = {
+      id: generateUUID(),
+      name: trimmed,
+      capacity: cap
+    };
+
+    const updatedTables = [...currentRestaurantTables, newTbl];
+    const updatedRest: Restaurant = {
+      ...activeRestaurant,
+      tablesCount: updatedTables.length,
+      tables: updatedTables,
+      is_synced: isOnline
+    };
+
+    const nextRestaurants = restaurants.map((r) => (r.id === activeRestaurant.id ? updatedRest : r));
+    setRestaurants(nextRestaurants);
+    saveLocalState('restaurants', nextRestaurants);
+    setNewTableName('');
+    setNewTableCapacity('4');
+    playAudioBeep(680);
+    showToast(`🪑 Added ${newTbl.name} (${cap} Seater) to restaurant!`);
+
+    if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
+
+    try {
+      await setDoc(doc(db, 'restaurants', activeRestaurant.id), updatedRest);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `restaurants/${activeRestaurant.id}`);
+    }
+  };
+
+  // Manager: Delete dining table
+  const handleDeleteTable = async (tbl: RestaurantTable) => {
+    const isRunning = activeKots.some((k) => k.table_name === tbl.name);
+    if (isRunning) {
+      showToast(`⚠️ Cannot delete "${tbl.name}"! It currently has active running orders. Settle bill first.`);
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete "${tbl.name}"?`)) return;
+
+    const updatedTables = currentRestaurantTables.filter((t) => t.id !== tbl.id && t.name !== tbl.name);
+    const updatedRest: Restaurant = {
+      ...activeRestaurant,
+      tablesCount: updatedTables.length,
+      tables: updatedTables,
+      is_synced: isOnline
+    };
+
+    const nextRestaurants = restaurants.map((r) => (r.id === activeRestaurant.id ? updatedRest : r));
+    setRestaurants(nextRestaurants);
+    saveLocalState('restaurants', nextRestaurants);
+    if (selectedTable === tbl.name) {
+      setSelectedTable('');
+    }
+    showToast(`🗑️ Removed ${tbl.name}`);
+
+    if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
+
+    try {
+      await setDoc(doc(db, 'restaurants', activeRestaurant.id), updatedRest);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `restaurants/${activeRestaurant.id}`);
+    }
+  };
+
   // Admin: Create restaurant
   const handleCreateRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminRestName.trim()) return;
     const newRestId = generateUUID();
     const count = parseInt(adminRestTables, 10) || 6;
+    const initialTables: RestaurantTable[] = Array.from({ length: count }).map((_, i) => ({
+      id: generateUUID(),
+      name: `Table ${i + 1}`,
+      capacity: 4
+    }));
 
     const newRest: Restaurant = {
       id: newRestId,
       name: adminRestName.trim(),
       city: adminRestCity.trim() || 'Main City',
       tablesCount: count,
+      tables: initialTables,
       is_synced: isOnline
     };
 
@@ -859,7 +1019,7 @@ export default function App() {
       }
 
       setCart({});
-      setSelectedTable('Table 1');
+      setSelectedTable('');
       setSelectedCategory('All');
       showToast('🔄 POS Database Reset to defaults!');
     }
@@ -1343,140 +1503,238 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
               {/* Left Column: Tables & Menu */}
               <div className={`md:col-span-7 lg:col-span-8 ${waiterSubTab !== 'ORDER' ? 'hidden md:block' : ''}`}>
-                {/* Step 1: Select Table */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm mb-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="font-extrabold text-sm sm:text-base flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-lg bg-orange-50 text-[#ff5722] flex items-center justify-center text-xs font-black">
-                        1
-                      </span>
-                      <span>Select Table</span>
-                    </div>
-                    <div className="text-[11px] font-bold text-slate-500">
-                      🟢 Free &nbsp; 🟠 Running
-                    </div>
-                  </div>
+                {!selectedTable ? (
+                  /* ================= STEP 1: MANDATORY TABLE SELECTION ================= */
+                  <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-md">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4 mb-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="w-7 h-7 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center text-xs font-black shadow-sm">
+                            1
+                          </span>
+                          <h2 className="font-black text-base sm:text-lg text-slate-900">
+                            Select Dining Table First
+                          </h2>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1">
+                          ⚡ Tap a table below to start punch order. Enforcing table selection first prevents mispunched KOTs during rush hours.
+                        </p>
+                      </div>
 
-                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2.5">
-                    {Array.from({ length: activeRestaurant.tablesCount || 6 }).map((_, i) => {
-                      const tName = `Table ${i + 1}`;
-                      const isOccupied = activeKots.some((k) => k.table_name === tName);
-                      const isSelected = selectedTable === tName;
+                      <div className="flex items-center gap-3 text-xs font-bold text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 self-start sm:self-auto">
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+                          <span>Vacant</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
+                          <span>Running</span>
+                        </span>
+                        <span className="text-slate-400">|</span>
+                        <span>{currentRestaurantTables.length} Tables</span>
+                      </div>
+                    </div>
 
-                      return (
-                        <button
-                          key={tName}
-                          onClick={() => setSelectedTable(tName)}
-                          className={`p-2.5 rounded-xl border-2 text-left transition relative cursor-pointer ${
-                            isSelected
-                              ? 'bg-orange-50 border-[#ff5722] shadow-md shadow-orange-500/20 -translate-y-0.5'
-                              : isOccupied
-                              ? 'bg-amber-50 border-amber-300'
-                              : 'bg-slate-50 border-slate-200 hover:border-slate-300'
-                          }`}
-                        >
-                          <span className="block font-black text-xs sm:text-sm text-slate-900">{tName}</span>
-                          <span
-                            className={`text-[10px] font-extrabold inline-block mt-1 ${
-                              isOccupied ? 'text-amber-600' : 'text-emerald-600'
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {currentRestaurantTables.map((tbl) => {
+                        const tableKots = activeKots.filter((k) => k.table_name === tbl.name);
+                        const isOccupied = tableKots.length > 0;
+                        const runningItemsCount = tableKots.reduce((acc, k) => acc + k.items.reduce((sum, i) => sum + i.qty, 0), 0);
+                        const runningTotal = tableKots.reduce((acc, k) => acc + k.items.reduce((sum, i) => sum + (i.price * i.qty), 0), 0);
+
+                        return (
+                          <button
+                            key={tbl.id}
+                            onClick={() => {
+                              setSelectedTable(tbl.name);
+                              playAudioBeep(640);
+                              showToast(`🪑 Selected ${tbl.name} — now select customer dishes!`);
+                            }}
+                            className={`p-4 rounded-2xl border-2 text-left transition-all relative cursor-pointer group hover:shadow-md hover:-translate-y-0.5 ${
+                              isOccupied
+                                ? 'bg-amber-50/70 border-amber-300 hover:border-amber-400'
+                                : 'bg-slate-50/80 border-slate-200 hover:border-[#ff5722] hover:bg-orange-50/30'
                             }`}
                           >
-                            {isOccupied ? '🟠 Running' : '🟢 Vacant'}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <span className="block font-black text-base text-slate-900 group-hover:text-[#ff5722] transition">
+                                  {tbl.name}
+                                </span>
+                                <span className="text-[11px] text-slate-500 font-bold block mt-0.5">
+                                  👥 {tbl.capacity || 4} Seater
+                                </span>
+                              </div>
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                  isOccupied
+                                    ? 'bg-amber-200 text-amber-900 border border-amber-300'
+                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                }`}
+                              >
+                                {isOccupied ? 'Running' : 'Free'}
+                              </span>
+                            </div>
 
-                {/* Step 2: Select Menu Items */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="font-extrabold text-sm sm:text-base flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-lg bg-orange-50 text-[#ff5722] flex items-center justify-center text-xs font-black">
-                        2
-                      </span>
-                      <span>Select Menu</span>
-                      <span className="text-[#ff5722] font-black text-xs sm:text-sm">({selectedTable})</span>
+                            {isOccupied ? (
+                              <div className="text-[11px] font-extrabold text-amber-800 bg-amber-100/70 px-2 py-1 rounded-lg mt-2 flex justify-between">
+                                <span>{runningItemsCount} items</span>
+                                <span>₹{runningTotal}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg mt-2 flex items-center justify-between">
+                                <span>Tap to Order</span>
+                                <span>➔</span>
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
-
-                  {/* Category horizontal scroll */}
-                  <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-none">
-                    {categories.map((c) => (
-                      <button
-                        key={c}
-                        onClick={() => setSelectedCategory(c)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer ${
-                          selectedCategory === c
-                            ? 'bg-[#0f172a] text-white border border-[#0f172a]'
-                            : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
-                        }`}
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Search Input */}
-                  <div className="relative mb-3">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search Paneer, Roti, Biryani..."
-                      className="w-full bg-slate-50 border border-slate-200 pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722] focus:bg-white transition"
-                    />
-                  </div>
-
-                  {/* Menu items grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {filteredMenus.map((item) => {
-                      const qty = cart[item.id] || 0;
-                      return (
-                        <div
-                          key={item.id}
-                          className={`flex items-center justify-between p-3 rounded-xl border-1.5 transition ${
-                            qty > 0
-                              ? 'border-[#ff5722] bg-orange-50/50'
-                              : 'border-slate-200 bg-white hover:border-slate-300'
-                          }`}
-                        >
-                          <div className="min-w-0 pr-2">
-                            <div className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-slate-800">
-                              <span className="w-3 h-3 border border-emerald-600 rounded flex items-center justify-center flex-shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                              </span>
-                              <span className="truncate">{item.name}</span>
-                            </div>
-                            <div className="text-xs font-extrabold text-slate-500 mt-0.5">₹{item.price}</div>
+                ) : (
+                  /* ================= STEP 2: MENU DISH SELECTION (Table Selected) ================= */
+                  <div className="space-y-4">
+                    {/* Active Selected Table Banner */}
+                    <div className="bg-gradient-to-r from-orange-50 via-amber-50 to-white border-2 border-[#ff5722] rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black shadow-sm flex-shrink-0">
+                          <LayoutGrid className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-slate-500 uppercase tracking-wider">
+                              Punching Order For:
+                            </span>
+                            <span className="text-base sm:text-lg font-black text-[#ff5722] bg-white px-3 py-0.5 rounded-lg border border-orange-200 shadow-xs">
+                              {selectedTable}
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-500">
+                              ({currentRestaurantTables.find((t) => t.name === selectedTable)?.capacity || 4} Seater)
+                            </span>
                           </div>
-
-                          <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {qty > 0 ? (
-                              <>
-                                <button
-                                  onClick={() => updateCart(item.id, -1)}
-                                  className="w-8 h-8 rounded-lg bg-slate-200 text-slate-800 flex items-center justify-center font-black text-sm hover:bg-slate-300 transition cursor-pointer"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
-                                <span className="font-black text-sm min-w-5 text-center">{qty}</span>
-                              </>
-                            ) : null}
-                            <button
-                              onClick={() => updateCart(item.id, 1)}
-                              className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black text-sm shadow-sm shadow-orange-500/30 hover:opacity-90 transition cursor-pointer"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
+                          <div className="text-xs font-semibold text-slate-600 mt-1 flex items-center gap-2">
+                            {activeKots.some((k) => k.table_name === selectedTable) ? (
+                              <span className="text-amber-800 font-bold bg-amber-100 px-2 py-0.5 rounded-md text-[11px]">
+                                🟠 Table has running orders (adding to existing bill)
+                              </span>
+                            ) : (
+                              <span className="text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded-md text-[11px]">
+                                🟢 Vacant Table (New customer order)
+                              </span>
+                            )}
                           </div>
                         </div>
-                      );
-                    })}
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          if (cartKeys.length > 0) {
+                            if (!window.confirm(`Switch table? Current ${cartSummary.totalQty} items in cart will be assigned to the newly selected table.`)) {
+                              return;
+                            }
+                          }
+                          setSelectedTable('');
+                        }}
+                        className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-extrabold text-xs shadow-xs transition flex items-center gap-1.5 cursor-pointer flex-shrink-0"
+                      >
+                        <ArrowLeft className="w-4 h-4 text-[#ff5722]" />
+                        <span>Switch Table</span>
+                      </button>
+                    </div>
+
+                    {/* Menu items card */}
+                    <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="font-extrabold text-sm sm:text-base flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-lg bg-orange-50 text-[#ff5722] flex items-center justify-center text-xs font-black">
+                            2
+                          </span>
+                          <span>Select Customer Dishes</span>
+                        </div>
+                        <span className="text-xs font-bold text-slate-500">
+                          {filteredMenus.length} dishes
+                        </span>
+                      </div>
+
+                      {/* Category horizontal scroll */}
+                      <div className="flex gap-2 overflow-x-auto pb-2 mb-3 scrollbar-none">
+                        {categories.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => setSelectedCategory(c)}
+                            className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                              selectedCategory === c
+                                ? 'bg-[#0f172a] text-white border border-[#0f172a]'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200'
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Search Input */}
+                      <div className="relative mb-3">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search Paneer, Roti, Biryani, Thali..."
+                          className="w-full bg-slate-50 border border-slate-200 pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722] focus:bg-white transition"
+                        />
+                      </div>
+
+                      {/* Menu items grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {filteredMenus.map((item) => {
+                          const qty = cart[item.id] || 0;
+                          return (
+                            <div
+                              key={item.id}
+                              className={`flex items-center justify-between p-3 rounded-xl border-1.5 transition ${
+                                qty > 0
+                                  ? 'border-[#ff5722] bg-orange-50/50'
+                                  : 'border-slate-200 bg-white hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="min-w-0 pr-2">
+                                <div className="flex items-center gap-1.5 font-bold text-xs sm:text-sm text-slate-800">
+                                  <span className="w-3 h-3 border border-emerald-600 rounded flex items-center justify-center flex-shrink-0">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                  </span>
+                                  <span className="truncate">{item.name}</span>
+                                </div>
+                                <div className="text-xs font-extrabold text-slate-500 mt-0.5">₹{item.price}</div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                {qty > 0 ? (
+                                  <>
+                                    <button
+                                      onClick={() => updateCart(item.id, -1)}
+                                      className="w-8 h-8 rounded-lg bg-slate-200 text-slate-800 flex items-center justify-center font-black text-sm hover:bg-slate-300 transition cursor-pointer"
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <span className="font-black text-sm min-w-5 text-center">{qty}</span>
+                                  </>
+                                ) : null}
+                                <button
+                                  onClick={() => updateCart(item.id, 1)}
+                                  className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black text-sm shadow-sm shadow-orange-500/30 hover:opacity-90 transition cursor-pointer"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Right Column: Live Kitchen KOT Feed */}
@@ -1578,18 +1836,24 @@ export default function App() {
               <div className="fixed bottom-4 left-3 right-3 max-w-xl mx-auto bg-[#0f172a] text-white p-3 sm:p-4 rounded-2xl shadow-2xl border border-slate-700 z-40 animate-slide-up">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-extrabold text-sm sm:text-base text-white truncate">
-                      {selectedTable} • {cartSummary.totalQty} Items | ₹{cartSummary.totalPrice}
+                    <div className="font-extrabold text-sm sm:text-base text-white truncate flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[#ff6b35] font-black bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-700">
+                        🪑 {selectedTable || 'No Table'}
+                      </span>
+                      <span className="text-slate-400">•</span>
+                      <span>{cartSummary.totalQty} Items</span>
+                      <span className="text-slate-400">|</span>
+                      <span className="text-emerald-400 font-black">₹{cartSummary.totalPrice}</span>
                     </div>
                     <div className="text-xs text-slate-300 truncate max-w-xs">{cartSummary.previewText}</div>
                   </div>
 
                   <button
                     onClick={confirmKOT}
-                    className="px-4 py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm whitespace-nowrap shadow-md shadow-orange-500/40 hover:opacity-95 transition flex items-center gap-1.5 cursor-pointer"
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm whitespace-nowrap shadow-md shadow-orange-500/40 hover:opacity-95 transition flex items-center gap-1.5 cursor-pointer flex-shrink-0"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>Confirm KOT</span>
+                    <span>Send KOT</span>
                   </button>
                 </div>
 
@@ -1817,8 +2081,88 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Column: Add Menu Dish & Activity */}
+            {/* Right Column: Add Dining Table, Add Menu Dish & Activity */}
             <div className="md:col-span-5 space-y-4">
+              {/* CARD 1: ADD NEW DINING TABLE (Styled identically to Add New Menu Dish) */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="font-black text-sm sm:text-base flex items-center gap-2">
+                    <LayoutGrid className="w-4 h-4 text-[#ff5722]" />
+                    <span>🪑 Add New Table</span>
+                  </div>
+                  <span className="text-[11px] font-bold bg-orange-50 text-[#ff5722] px-2.5 py-0.5 rounded-full border border-orange-200">
+                    {currentRestaurantTables.length} Active Tables
+                  </span>
+                </div>
+
+                <form onSubmit={handleAddTable} className="space-y-2.5">
+                  <input
+                    type="text"
+                    placeholder="Table Name / No (e.g. Table 7, T-4, Rooftop 1)"
+                    value={newTableName}
+                    onChange={(e) => setNewTableName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="40"
+                      placeholder="Capacity (e.g. 4 Pax)"
+                      value={newTableCapacity}
+                      onChange={(e) => setNewTableCapacity(e.target.value)}
+                      className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                    />
+                    <div className="flex items-center text-xs text-slate-500 font-bold px-1">
+                      👥 Seating Capacity
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
+                  >
+                    + Add Table to Restaurant
+                  </button>
+                </form>
+
+                {/* Active tables list with delete capability */}
+                <div className="mt-4 pt-3 border-t border-slate-100">
+                  <div className="text-xs font-bold text-slate-600 mb-2 flex items-center justify-between">
+                    <span>Configured Tables:</span>
+                    <span className="text-[10px] text-slate-400">Click 🗑️ to remove</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
+                    {currentRestaurantTables.map((tbl) => {
+                      const isRunning = activeKots.some((k) => k.table_name === tbl.name);
+                      return (
+                        <div
+                          key={tbl.id}
+                          className={`p-2 rounded-xl border flex items-center justify-between text-xs transition ${
+                            isRunning ? 'bg-amber-50/80 border-amber-300' : 'bg-slate-50 border-slate-200'
+                          }`}
+                        >
+                          <div className="min-w-0 pr-1">
+                            <span className="font-extrabold text-slate-900 block truncate">{tbl.name}</span>
+                            <span className="text-[10px] text-slate-500 block">
+                              {tbl.capacity || 4} Pax • {isRunning ? '🟠 Running' : '🟢 Free'}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTable(tbl)}
+                            className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer flex-shrink-0"
+                            title="Delete table"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* CARD 2: ADD NEW MENU DISH */}
               <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
                 <div className="font-black text-sm sm:text-base mb-3 flex items-center gap-2">
                   <UtensilsCrossed className="w-4 h-4 text-[#ff5722]" />
