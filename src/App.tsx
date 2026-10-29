@@ -26,7 +26,11 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  Database
+  Database,
+  Wifi,
+  WifiOff,
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 
 import {
@@ -42,6 +46,7 @@ import {
   handleFirestoreError,
   testFirestoreConnection
 } from './firebase.ts';
+import { usePWAInstall } from './usePWAInstall.ts';
 
 export type UserRole = 'ADMIN' | 'MANAGER' | 'WAITER' | 'KITCHEN';
 
@@ -51,7 +56,7 @@ export interface StaffUser {
   username: string;
   pinOrPass: string;
   role: UserRole;
-  restaurant_id: string; // 'all' or specific restaurant ID
+  restaurant_id: string;
   is_active: boolean;
 }
 
@@ -185,13 +190,53 @@ function playAudioBeep(freq = 680) {
 }
 
 export default function App() {
-  // Database State connected with Firestore + local fallback
-  const [restaurants, setRestaurants] = useState<Restaurant[]>(INITIAL_RESTAURANTS);
-  const [menus, setMenus] = useState<MenuItem[]>(INITIAL_MENUS);
-  const [kots, setKots] = useState<KOT[]>([]);
-  const [completedOrders, setCompletedOrders] = useState<CompletedOrder[]>([]);
-  const [staff, setStaff] = useState<StaffUser[]>(INITIAL_STAFF);
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  // Network State
+  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
   const [firebaseConnected, setFirebaseConnected] = useState<boolean>(false);
+
+  // Database State connected with Firestore + local fallback
+  const [restaurants, setRestaurants] = useState<Restaurant[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_restaurants`);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_RESTAURANTS;
+  });
+
+  const [menus, setMenus] = useState<MenuItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_menus`);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_MENUS;
+  });
+
+  const [kots, setKots] = useState<KOT[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_kots`);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const [completedOrders, setCompletedOrders] = useState<CompletedOrder[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_completed`);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  const [staff, setStaff] = useState<StaffUser[]>(() => {
+    try {
+      const saved = localStorage.getItem(`${STORAGE_KEY}_staff`);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_STAFF;
+  });
 
   // Authentication State
   const [currentUser, setCurrentUser] = useState<StaffUser | null>(null);
@@ -208,7 +253,6 @@ export default function App() {
   const [activeRestaurantId, setActiveRestaurantId] = useState<string>('rest_1');
   const [selectedTable, setSelectedTable] = useState<string>('Table 1');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [isOnline, setIsOnline] = useState<boolean>(true);
   const [cart, setCart] = useState<{ [menuId: string]: number }>({});
   const [chefNote, setChefNote] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -241,12 +285,41 @@ export default function App() {
     }, 2800);
   };
 
-  // Test Firestore connection on mount & register real-time listeners
+  // Sync to localStorage
+  const saveLocalState = (type: 'restaurants' | 'menus' | 'kots' | 'completed' | 'staff', data: any) => {
+    try {
+      localStorage.setItem(`${STORAGE_KEY}_${type}`, JSON.stringify(data));
+    } catch {}
+  };
+
+  // Online / Offline Network Listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast('🌐 Network Connected! Cloud Sync Active');
+      testFirestoreConnection().then(setFirebaseConnected);
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast('📡 You are Offline. Operating in Local POS Mode');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Test Firestore connection on mount & register real-time listeners with local caching
   useEffect(() => {
     testFirestoreConnection().then((connected) => {
       setFirebaseConnected(connected);
       if (connected) {
-        showToast('🔥 Connected to Firebase Firestore!');
+        showToast('🔥 Firestore Realtime Sync Active');
       }
     });
 
@@ -258,12 +331,11 @@ export default function App() {
           const list: Restaurant[] = [];
           snapshot.forEach((d) => list.push(d.data() as Restaurant));
           setRestaurants(list);
-        } else {
-          // Seed initial restaurants to Firestore
+          saveLocalState('restaurants', list);
+        } else if (navigator.onLine) {
+          // Seed initial restaurants
           INITIAL_RESTAURANTS.forEach((r) => {
-            setDoc(doc(db, 'restaurants', r.id), r).catch((err) =>
-              handleFirestoreError(err, OperationType.WRITE, 'restaurants')
-            );
+            setDoc(doc(db, 'restaurants', r.id), r).catch(() => {});
           });
         }
       },
@@ -280,12 +352,11 @@ export default function App() {
           const list: MenuItem[] = [];
           snapshot.forEach((d) => list.push(d.data() as MenuItem));
           setMenus(list);
-        } else {
+          saveLocalState('menus', list);
+        } else if (navigator.onLine) {
           // Seed initial menus
           INITIAL_MENUS.forEach((m) => {
-            setDoc(doc(db, 'menus', m.id), m).catch((err) =>
-              handleFirestoreError(err, OperationType.WRITE, 'menus')
-            );
+            setDoc(doc(db, 'menus', m.id), m).catch(() => {});
           });
         }
       },
@@ -294,15 +365,15 @@ export default function App() {
       }
     );
 
-    // 3. Listen to KOTs (Real-time orders between Waiter & Kitchen)
+    // 3. Listen to KOTs
     const unsubKots = onSnapshot(
       collection(db, 'kots'),
       (snapshot) => {
         const list: KOT[] = [];
         snapshot.forEach((d) => list.push(d.data() as KOT));
-        // Sort newest first
         list.sort((a, b) => (b.token_no || 0) - (a.token_no || 0));
         setKots(list);
+        saveLocalState('kots', list);
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, 'kots');
@@ -316,13 +387,14 @@ export default function App() {
         const list: CompletedOrder[] = [];
         snapshot.forEach((d) => list.push(d.data() as CompletedOrder));
         setCompletedOrders(list);
+        saveLocalState('completed', list);
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, 'completed_orders');
       }
     );
 
-    // 5. Listen to Staff credentials (created by Admin)
+    // 5. Listen to Staff credentials
     const unsubStaff = onSnapshot(
       collection(db, 'staff'),
       (snapshot) => {
@@ -330,12 +402,10 @@ export default function App() {
           const list: StaffUser[] = [];
           snapshot.forEach((d) => list.push(d.data() as StaffUser));
           setStaff(list);
-        } else {
-          // Seed initial admin, manager, waiter, and kitchen credentials
+          saveLocalState('staff', list);
+        } else if (navigator.onLine) {
           INITIAL_STAFF.forEach((s) => {
-            setDoc(doc(db, 'staff', s.id), s).catch((err) =>
-              handleFirestoreError(err, OperationType.WRITE, 'staff')
-            );
+            setDoc(doc(db, 'staff', s.id), s).catch(() => {});
           });
         }
       },
@@ -449,10 +519,6 @@ export default function App() {
     return activeKots.filter((k) => !['SERVED', 'BILLED'].includes(k.status));
   }, [activeKots]);
 
-  const unsyncedCount = useMemo(() => {
-    return kots.filter((k) => !k.is_synced).length + completedOrders.filter((o) => !o.is_synced).length;
-  }, [kots, completedOrders]);
-
   // Cart operations
   const updateCart = (menuId: string, delta: number) => {
     setCart((prev) => {
@@ -486,7 +552,7 @@ export default function App() {
     return { totalQty, totalPrice, previewText: itemsPreview.join(', ') };
   }, [cart, cartKeys, currentRestaurantMenus]);
 
-  // Confirm KOT -> write to Firestore
+  // Confirm KOT (Works Offline and Online via Firestore local persistence)
   const confirmKOT = async () => {
     if (!cartKeys.length) return;
     const items: KotItem[] = cartKeys.map((id) => {
@@ -505,41 +571,52 @@ export default function App() {
       note: chefNote.trim(),
       items,
       created_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      is_synced: true,
+      is_synced: isOnline,
       waiter_name: currentUser?.name || 'Staff'
     };
 
+    // Update local state immediately for instant feedback
+    const nextKots = [newKot, ...kots];
+    setKots(nextKots);
+    saveLocalState('kots', nextKots);
+    setCart({});
+    setChefNote('');
+    playAudioBeep(540);
+    showToast(isOnline ? `🚀 KOT #${tokenNo} sent to Kitchen!` : `💾 KOT #${tokenNo} saved locally (Offline)`);
+    setWaiterSubTab('KOT');
+
+    if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
+
+    // Write to Firestore (cached in IndexedDB offline and synced on reconnect)
     try {
       await setDoc(doc(db, 'kots', kotId), newKot);
-      if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
-      setCart({});
-      setChefNote('');
-      playAudioBeep(540);
-      showToast(`🚀 KOT #${tokenNo} synced to Firestore & Kitchen!`);
-      setWaiterSubTab('KOT');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'kots');
-      showToast('Error syncing KOT to Firebase');
     }
   };
 
-  // Change KOT Status -> update in Firestore
+  // Change KOT Status (Offline + Online)
   const changeKotStatus = async (kotId: string, newStatus: KotStatus) => {
     const target = kots.find((k) => k.id === kotId);
     if (!target) return;
-    const updated: KOT = { ...target, status: newStatus, is_synced: true };
+    const updated: KOT = { ...target, status: newStatus, is_synced: isOnline };
+
+    const nextKots = kots.map((k) => (k.id === kotId ? updated : k));
+    setKots(nextKots);
+    saveLocalState('kots', nextKots);
+    playAudioBeep(880);
+    showToast(`🔥 KOT #${target.token_no} ➔ ${newStatus.replace('_', ' ')}`);
+
+    if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
 
     try {
       await setDoc(doc(db, 'kots', kotId), updated);
-      playAudioBeep(880);
-      showToast(`🔥 KOT #${target.token_no} ➔ ${newStatus.replace('_', ' ')}`);
-      if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `kots/${kotId}`);
     }
   };
 
-  // Settle Table Bill -> update KOTs & write completed_order to Firestore
+  // Settle Table Bill (Offline + Online)
   const settleTableBill = async (tableName: string, mode: 'CASH' | 'UPI') => {
     const tableKots = kots.filter(
       (k) => k.restaurant_id === activeRestaurantId && k.table_name === tableName && k.status !== 'BILLED'
@@ -565,25 +642,36 @@ export default function App() {
       summary: summaryList.join(', '),
       grand_total: grandTotal,
       payment_mode: mode,
-      is_synced: true,
+      is_synced: isOnline,
       date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
+    // Update local state immediately
+    const nextKots = kots.map((k) =>
+      k.restaurant_id === activeRestaurantId && k.table_name === tableName && k.status !== 'BILLED'
+        ? { ...k, status: 'BILLED' as KotStatus }
+        : k
+    );
+    const nextCompleted = [newCompleted, ...completedOrders];
+    setKots(nextKots);
+    setCompletedOrders(nextCompleted);
+    saveLocalState('kots', nextKots);
+    saveLocalState('completed', nextCompleted);
+
+    showToast(`✅ ${tableName} Bill Paid (₹${grandTotal}) via ${mode}`);
+    if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
+
     try {
-      // 1. Mark kots as billed
       for (const k of tableKots) {
         await setDoc(doc(db, 'kots', k.id), { ...k, status: 'BILLED' });
       }
-      // 2. Add completed order
       await setDoc(doc(db, 'completed_orders', orderId), newCompleted);
-      showToast(`✅ ${tableName} Bill Paid (₹${grandTotal}) via ${mode}`);
-      if (lanChannelRef.current) lanChannelRef.current.postMessage({ type: 'SYNC' });
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'completed_orders');
     }
   };
 
-  // Manager: Add dish to menu in Firestore
+  // Manager: Add dish to menu
   const handleAddDish = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDishName.trim() || !newDishPrice) return;
@@ -597,21 +685,25 @@ export default function App() {
       name: newDishName.trim(),
       category: newDishCat.trim() || 'Specials',
       price: priceNum,
-      is_synced: true
+      is_synced: isOnline
     };
+
+    const nextMenus = [...menus, newItem];
+    setMenus(nextMenus);
+    saveLocalState('menus', nextMenus);
+    setNewDishName('');
+    setNewDishCat('');
+    setNewDishPrice('');
+    showToast('🍲 Dish added to menu!');
 
     try {
       await setDoc(doc(db, 'menus', dishId), newItem);
-      setNewDishName('');
-      setNewDishCat('');
-      setNewDishPrice('');
-      showToast('🍲 Dish added to Firebase menu!');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'menus');
     }
   };
 
-  // Admin: Create restaurant in Firestore
+  // Admin: Create restaurant
   const handleCreateRestaurant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminRestName.trim()) return;
@@ -623,7 +715,7 @@ export default function App() {
       name: adminRestName.trim(),
       city: adminRestCity.trim() || 'Main City',
       tablesCount: count,
-      is_synced: true
+      is_synced: isOnline
     };
 
     const dishId = generateUUID();
@@ -633,22 +725,30 @@ export default function App() {
       name: 'Special Veg Thali',
       category: 'Main Course',
       price: 180,
-      is_synced: true
+      is_synced: isOnline
     };
+
+    const nextRestaurants = [...restaurants, newRest];
+    const nextMenus = [...menus, seedDish];
+    setRestaurants(nextRestaurants);
+    setMenus(nextMenus);
+    saveLocalState('restaurants', nextRestaurants);
+    saveLocalState('menus', nextMenus);
+
+    setActiveRestaurantId(newRestId);
+    setAdminRestName('');
+    setAdminRestCity('');
+    showToast('🏢 New Restaurant Tenant saved!');
 
     try {
       await setDoc(doc(db, 'restaurants', newRestId), newRest);
       await setDoc(doc(db, 'menus', dishId), seedDish);
-      setActiveRestaurantId(newRestId);
-      setAdminRestName('');
-      setAdminRestCity('');
-      showToast('🏢 New Restaurant Tenant saved to Firebase!');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'restaurants');
     }
   };
 
-  // Admin: Create Staff Credential in Firestore
+  // Admin: Create Staff Credential
   const handleCreateStaff = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaffName.trim() || !newStaffUsername.trim() || !newStaffPin.trim()) {
@@ -675,12 +775,16 @@ export default function App() {
       is_active: true
     };
 
+    const nextStaff = [...staff, newStaff];
+    setStaff(nextStaff);
+    saveLocalState('staff', nextStaff);
+    setNewStaffName('');
+    setNewStaffUsername('');
+    setNewStaffPin('');
+    showToast(`👤 Created ${newStaffRole} credentials for ${newStaff.name}`);
+
     try {
       await setDoc(doc(db, 'staff', staffId), newStaff);
-      setNewStaffName('');
-      setNewStaffUsername('');
-      setNewStaffPin('');
-      showToast(`👤 Created ${newStaffRole} credentials in Firebase for ${newStaff.name}`);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'staff');
     }
@@ -692,9 +796,13 @@ export default function App() {
       return;
     }
     if (window.confirm('Are you sure you want to delete this staff credential?')) {
+      const nextStaff = staff.filter((s) => s.id !== staffId);
+      setStaff(nextStaff);
+      saveLocalState('staff', nextStaff);
+      showToast('Staff credential deleted');
+
       try {
         await deleteDoc(doc(db, 'staff', staffId));
-        showToast('Staff credential deleted from Firebase');
       } catch (err) {
         handleFirestoreError(err, OperationType.DELETE, `staff/${staffId}`);
       }
@@ -704,34 +812,43 @@ export default function App() {
   const toggleStaffStatus = async (staffId: string) => {
     const s = staff.find((item) => item.id === staffId);
     if (!s) return;
+    const updated = { ...s, is_active: !s.is_active };
+    const nextStaff = staff.map((item) => (item.id === staffId ? updated : item));
+    setStaff(nextStaff);
+    saveLocalState('staff', nextStaff);
+    showToast('Staff status updated');
+
     try {
-      await setDoc(doc(db, 'staff', staffId), { ...s, is_active: !s.is_active });
-      showToast('Staff status updated in Firebase');
+      await setDoc(doc(db, 'staff', staffId), updated);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `staff/${staffId}`);
     }
   };
 
   const resetAllData = async () => {
-    if (window.confirm('Reset all demo data in Firebase to defaults?')) {
-      // Re-seed staff
-      for (const s of INITIAL_STAFF) {
-        await setDoc(doc(db, 'staff', s.id), s);
+    if (window.confirm('Reset all demo data to defaults?')) {
+      setStaff(INITIAL_STAFF);
+      setRestaurants(INITIAL_RESTAURANTS);
+      setMenus(INITIAL_MENUS);
+      setKots([]);
+      setCompletedOrders([]);
+      saveLocalState('staff', INITIAL_STAFF);
+      saveLocalState('restaurants', INITIAL_RESTAURANTS);
+      saveLocalState('menus', INITIAL_MENUS);
+      saveLocalState('kots', []);
+      saveLocalState('completed', []);
+
+      if (navigator.onLine) {
+        for (const s of INITIAL_STAFF) await setDoc(doc(db, 'staff', s.id), s);
+        for (const r of INITIAL_RESTAURANTS) await setDoc(doc(db, 'restaurants', r.id), r);
+        for (const m of INITIAL_MENUS) await setDoc(doc(db, 'menus', m.id), m);
+        for (const k of kots) await deleteDoc(doc(db, 'kots', k.id));
       }
-      for (const r of INITIAL_RESTAURANTS) {
-        await setDoc(doc(db, 'restaurants', r.id), r);
-      }
-      for (const m of INITIAL_MENUS) {
-        await setDoc(doc(db, 'menus', m.id), m);
-      }
-      // Clear kots
-      for (const k of kots) {
-        await deleteDoc(doc(db, 'kots', k.id));
-      }
+
       setCart({});
       setSelectedTable('Table 1');
       setSelectedCategory('All');
-      showToast('🔄 Firebase Database Reset to default seeds!');
+      showToast('🔄 POS Database Reset to defaults!');
     }
   };
 
@@ -752,7 +869,6 @@ export default function App() {
     );
   };
 
-  // Group manager active bills by table
   const managerTableGroups = useMemo(() => {
     const grouped: { [tName: string]: KOT[] } = {};
     activeKots.forEach((k) => {
@@ -763,11 +879,19 @@ export default function App() {
   }, [activeKots]);
 
   // =========================================================================
-  // VIEW 1: LOGIN PAGE (Active when not authenticated)
+  // VIEW 1: LOGIN PAGE
   // =========================================================================
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] text-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans">
+        {/* Offline notification banner if offline */}
+        {!isOnline && (
+          <div className="bg-amber-600/90 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 max-w-md mx-auto mb-2 shadow-lg">
+            <WifiOff className="w-4 h-4" />
+            <span>Offline Mode Active — You can log in and run POS locally</span>
+          </div>
+        )}
+
         {/* Toast notifications */}
         <div className="fixed top-6 left-4 right-4 max-w-sm mx-auto z-50 flex flex-col gap-2 pointer-events-none">
           {toasts.map((t) => (
@@ -782,19 +906,18 @@ export default function App() {
 
         <div className="max-w-md w-full mx-auto my-auto py-8">
           {/* Logo & Heading */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] flex items-center justify-center font-black text-3xl mx-auto shadow-lg shadow-orange-500/30 mb-4 border border-orange-400/30">
               P
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center justify-center gap-2">
               <span>POSHub Pro</span>
-              <span className="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
-                <Database className="w-3 h-3" />
-                <span>Firestore</span>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                <span>Offline + PWA</span>
               </span>
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 font-medium mt-1">
-              Multi-Restaurant KOT, Kitchen & Billing with Real-Time Firebase
+              Complete Restaurant POS • Runs 100% Offline with Cloud Auto-Sync
             </p>
           </div>
 
@@ -807,11 +930,13 @@ export default function App() {
                   <span>Staff Login</span>
                 </h2>
                 <p className="text-[11px] text-slate-400 font-medium">
-                  Credentials managed securely by Admin in Firestore
+                  Offline storage ready • Admin authorized credentials
                 </p>
               </div>
-              <span className="text-[10px] font-black uppercase tracking-wider bg-orange-500/10 text-orange-400 border border-orange-500/30 px-2 py-1 rounded-full">
-                {firebaseConnected ? '🟢 Cloud Ready' : '🟡 Initializing'}
+              <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-1 rounded-full border ${
+                isOnline ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+              }`}>
+                {isOnline ? '🟢 Online' : '🟠 Offline Mode'}
               </span>
             </div>
 
@@ -875,7 +1000,7 @@ export default function App() {
             <div className="mt-6 pt-5 border-t border-slate-700/60">
               <div className="text-center text-[11px] font-bold text-slate-400 mb-3 flex items-center justify-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>Quick Test (Firebase Authorized Accounts)</span>
+                <span>Quick Test (Pre-Seeded Roles)</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {staff.map((s) => (
@@ -899,13 +1024,22 @@ export default function App() {
             </div>
           </div>
 
-          <div className="text-center mt-6 text-xs text-slate-500">
-            Powered by Firebase Firestore database & cloud sync.
-          </div>
+          {/* In-app Install Prompt button on Login screen */}
+          {isInstallable && (
+            <div className="mt-4 text-center">
+              <button
+                onClick={install}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl shadow-md transition"
+              >
+                <Download className="w-4 h-4 text-orange-400" />
+                <span>Install POS App on this Device (Works Offline)</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <footer className="text-center text-[11px] text-slate-500 py-2">
-          POSHub Pro • Real-Time Multi-Tenant POS with Google Firebase
+          POSHub Pro • Native Offline IndexedDB Persistence & Service Worker Cache
         </footer>
       </div>
     );
@@ -928,11 +1062,12 @@ export default function App() {
             <div className="min-w-0">
               <div className="text-[9px] sm:text-[10px] text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
                 <span>Multi-Restaurant POS</span>
-                <span className="text-[8px] bg-emerald-500/20 text-emerald-300 px-1 rounded font-mono">
-                  FIRESTORE
+                <span className={`text-[8px] px-1.5 py-0.2 rounded font-mono font-bold ${
+                  isOnline ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'
+                }`}>
+                  {isOnline ? 'CLOUD SYNC' : 'OFFLINE MODE'}
                 </span>
               </div>
-              {/* Only Admin or multi-outlet manager can switch restaurant freely */}
               {isAdmin || currentUser.restaurant_id === 'all' ? (
                 <select
                   value={activeRestaurantId}
@@ -960,22 +1095,37 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* User Profile Badge */}
-            <div className="hidden md:flex items-center gap-2 bg-[#1e293b] border border-slate-700 px-3 py-1 rounded-full text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className="font-bold text-slate-200">{currentUser.name}</span>
-              <span className="bg-[#ff5722] text-white text-[10px] font-black px-1.5 py-0.2 rounded-md uppercase">
-                {currentUser.role}
-              </span>
-            </div>
+            {/* Install PWA Button (In-App) */}
+            {isInstallable && !isInstalled && (
+              <button
+                onClick={install}
+                className="hidden sm:inline-flex items-center gap-1.5 bg-gradient-to-r from-orange-500 to-amber-500 text-white font-extrabold text-xs px-3 py-1.5 rounded-full shadow-md shadow-orange-500/20 hover:opacity-95 transition"
+                title="Install App for full offline use"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Install POS</span>
+              </button>
+            )}
 
-            {/* Cloud Firestore indicator */}
+            {isIOS && !isInstalled && (
+              <button
+                onClick={() => setShowIOSGuide(true)}
+                className="hidden sm:inline-flex items-center gap-1.5 bg-slate-800 text-slate-300 border border-slate-700 font-extrabold text-xs px-2.5 py-1.5 rounded-full hover:text-white transition"
+              >
+                <span>Install on iOS</span>
+              </button>
+            )}
+
+            {/* Online / Offline status badge */}
             <div
-              className="bg-[#1e293b] border border-slate-700 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 text-emerald-400"
-              title="Real-Time Firebase Firestore Connected"
+              className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-extrabold flex items-center gap-1.5 ${
+                isOnline
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-600'
+                  : 'bg-amber-500/20 text-amber-400 border border-amber-600'
+              }`}
             >
-              <Database className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline font-mono text-[11px]">Synced</span>
+              {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
             </div>
 
             {/* Logout Button */}
@@ -991,7 +1141,39 @@ export default function App() {
         </div>
       </header>
 
-      {/* ================= TOAST ALERTS ================= */}
+      {/* Offline Alert Bar when connection is lost */}
+      {!isOnline && (
+        <div className="bg-amber-500 text-slate-900 px-4 py-2 font-bold text-xs flex items-center justify-between shadow-md">
+          <div className="flex items-center gap-2 mx-auto">
+            <AlertTriangle className="w-4 h-4 text-slate-900" />
+            <span>
+              <b>Working Offline:</b> New KOTs and bills will be saved to this device and automatically sync to the cloud when internet returns.
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* iOS Safari Install Guide Modal */}
+      {showIOSGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-base font-black text-slate-900">Install POSHub on iPhone / iPad</h3>
+            <p className="mt-3 text-xs text-slate-600 leading-relaxed">
+              1. Tap the <b>Share</b> button (square with arrow) at the bottom of Safari.<br />
+              2. Scroll down and tap <b>Add to Home Screen</b>.<br />
+              3. Tap <b>Add</b>. The POS will launch like a standalone app with full offline support.
+            </p>
+            <button
+              onClick={() => setShowIOSGuide(false)}
+              className="mt-5 w-full rounded-xl bg-[#0f172a] text-white py-2.5 text-xs font-bold hover:bg-slate-800 transition"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast alerts */}
       <div className="fixed top-16 left-4 right-4 max-w-sm mx-auto z-50 flex flex-col gap-2 pointer-events-none">
         {toasts.map((t) => (
           <div
@@ -1015,7 +1197,7 @@ export default function App() {
           </div>
           {isAdmin && (
             <span className="text-[11px] font-bold text-[#ff5722] hidden sm:inline">
-              🛡️ Super Admin Control: Manage Staff, Kitchen Tickets, Billing & Outlets in Firebase
+              🛡️ Super Admin Control: Full Access across Waiter, Kitchen, Manager & Outlets
             </span>
           )}
         </div>
@@ -1197,7 +1379,7 @@ export default function App() {
                       <span>Live Kitchen KOT Status</span>
                     </div>
                     <span className="text-[10px] font-extrabold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                      Firebase Realtime
+                      {isOnline ? 'Cloud Synced' : 'Offline Cached'}
                     </span>
                   </div>
 
@@ -1262,7 +1444,7 @@ export default function App() {
 
                           <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-100">
                             <span>
-                              🔥 Firestore • {k.created_at}
+                              {isOnline ? '✔ Cloud Synced' : '💾 Offline Storage'} • {k.created_at}
                             </span>
                             {k.status === 'READY' && (
                               <button
@@ -1328,7 +1510,7 @@ export default function App() {
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                Tap status buttons to progress orders: <b>Start ➔ Cooking ➔ Ready</b> (Updates live in Firestore)
+                Tap status buttons to progress orders: <b>Start ➔ Cooking ➔ Ready</b> (Works Offline & Online)
               </p>
             </div>
 
@@ -1499,7 +1681,7 @@ export default function App() {
               <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
                 <div className="font-black text-sm sm:text-base mb-3 flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>✅ Today's Settled Bills (Stored in Firestore)</span>
+                  <span>✅ Today's Settled Bills</span>
                 </div>
 
                 {completedOrders.filter((o) => o.restaurant_id === activeRestaurantId).length === 0 ? (
@@ -1526,7 +1708,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* Right Column: Add Menu Dish & Sync Log */}
+            {/* Right Column: Add Menu Dish & Activity */}
             <div className="md:col-span-5 space-y-4">
               <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
                 <div className="font-black text-sm sm:text-base mb-3 flex items-center gap-2">
@@ -1562,19 +1744,21 @@ export default function App() {
                     type="submit"
                     className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
                   >
-                    + Save Dish to Firestore
+                    + Save Dish to Menu
                   </button>
                 </form>
               </div>
 
-              {/* Firestore Real-Time Activity Log */}
+              {/* Real-Time / Offline Status Stream */}
               <div className="bg-[#0f172a] text-white rounded-2xl p-4 border border-slate-800 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <div className="font-black text-xs sm:text-sm text-amber-400 flex items-center gap-1.5">
                     <Cloud className="w-4 h-4" />
-                    <span>🔥 Firestore Realtime Sync Stream</span>
+                    <span>POS Local & Cloud Queue</span>
                   </div>
-                  <span className="text-[10px] text-emerald-400 font-mono">LIVE ON-SNAPSHOT</span>
+                  <span className={`text-[10px] font-mono ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {isOnline ? 'ONLINE SYNC' : 'LOCAL CACHE'}
+                  </span>
                 </div>
 
                 <div className="font-mono text-[11px] max-h-52 overflow-y-auto space-y-1.5 pr-1">
@@ -1586,8 +1770,8 @@ export default function App() {
                         <span className="truncate max-w-[190px] text-slate-300">
                           [KOT #{k.token_no}] {k.table_name} ({k.status})
                         </span>
-                        <span className="text-[10px] font-bold text-emerald-400">
-                          ✔ FIRESTORE
+                        <span className={`text-[10px] font-bold ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          {isOnline ? '✔ CLOUD' : '💾 OFFLINE'}
                         </span>
                       </div>
                     ))
@@ -1610,7 +1794,7 @@ export default function App() {
                     <span>Staff Credentials Management</span>
                   </h2>
                   <p className="text-xs sm:text-sm text-slate-500">
-                    Admin creates and authorizes credentials for Waiters, Kitchen chefs, and Managers in Firebase Firestore.
+                    Admin creates and authorizes credentials for Waiters, Kitchen chefs, and Managers. Works completely offline.
                   </p>
                 </div>
                 <span className="self-start sm:self-auto bg-orange-100 text-[#ff5722] text-xs font-black px-3 py-1 rounded-full">
@@ -1710,7 +1894,7 @@ export default function App() {
                       type="submit"
                       className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-md shadow-orange-500/20 hover:opacity-95 transition cursor-pointer"
                     >
-                      + Authorize & Save to Firestore
+                      + Authorize Staff Credentials
                     </button>
                   </form>
                 </div>
@@ -1718,7 +1902,7 @@ export default function App() {
                 {/* List of existing staff credentials */}
                 <div className="lg:col-span-7">
                   <h3 className="font-extrabold text-sm text-slate-800 mb-3">
-                    Active Staff Credentials in Firestore ({staff.length})
+                    Active Staff Credentials ({staff.length})
                   </h3>
 
                   <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
@@ -1823,7 +2007,7 @@ export default function App() {
                     type="submit"
                     className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
                   >
-                    ➕ Create Restaurant in Firestore
+                    ➕ Create Restaurant Tenant
                   </button>
                   <button
                     type="button"
@@ -1831,7 +2015,7 @@ export default function App() {
                     className="w-full py-2 rounded-xl bg-red-50 text-red-700 hover:bg-red-100 font-black text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span>🔄 Reset Firestore Database & Initial Accounts</span>
+                    <span>🔄 Reset Demo Database & Seed Accounts</span>
                   </button>
                 </form>
               </div>
