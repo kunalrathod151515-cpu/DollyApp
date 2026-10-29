@@ -39,7 +39,11 @@ import {
   X,
   FileText,
   SlidersHorizontal,
-  Copy
+  Copy,
+  Users,
+  Clock,
+  Filter,
+  Layers
 } from 'lucide-react';
 
 import {
@@ -94,6 +98,24 @@ export interface MenuItem {
   is_available?: boolean;
 }
 
+export interface PrintableBillItem {
+  name: string;
+  qty: number;
+  price: number;
+  amount: number;
+  waiterName?: string;
+  kotNo?: number;
+  time?: string;
+}
+
+export interface WaiterServiceGroup {
+  waiterName: string;
+  kotTokens: number[];
+  itemsCount: number;
+  subtotal: number;
+  items: PrintableBillItem[];
+}
+
 export interface PrintableBillData {
   title: string;
   restaurantName: string;
@@ -101,19 +123,25 @@ export interface PrintableBillData {
   billNo: string;
   tableName: string;
   waiterName?: string;
+  waitersList?: string[];
   dateTime: string;
-  items: { name: string; qty: number; price: number; amount: number }[];
+  items: PrintableBillItem[];
   subtotal: number;
   gstAmount: number;
   grandTotal: number;
   paymentMode?: string;
   isSettled: boolean;
+  waiterGroups?: WaiterServiceGroup[];
 }
 
 interface KotItem {
   name: string;
   price: number;
   qty: number;
+  waiter_name?: string;
+  waiter_id?: string;
+  time?: string;
+  kot_token?: number;
 }
 
 type KotStatus = 'CREATED' | 'COOKING_STARTED' | 'COOKING' | 'READY' | 'SERVED' | 'BILLED';
@@ -129,6 +157,9 @@ interface KOT {
   created_at: string;
   is_synced: boolean;
   waiter_name?: string;
+  waiter_id?: string;
+  served_by_name?: string;
+  served_at?: string;
 }
 
 interface CompletedOrder {
@@ -140,6 +171,12 @@ interface CompletedOrder {
   payment_mode: 'CASH' | 'UPI';
   is_synced: boolean;
   date?: string;
+  waiters_summary?: string;
+  waiter_breakdown?: {
+    waiterName: string;
+    itemsCount: number;
+    total: number;
+  }[];
 }
 
 const STORAGE_KEY = 'POSHUB_PRO_OFFLINE_DB_V4';
@@ -167,6 +204,24 @@ const INITIAL_STAFF: StaffUser[] = [
     id: 'staff_waiter_1',
     name: 'Rohan Patil (Waiter)',
     username: 'waiter',
+    pinOrPass: '1234',
+    role: 'WAITER',
+    restaurant_id: 'rest_1',
+    is_active: true
+  },
+  {
+    id: 'staff_waiter_2',
+    name: 'Priya Sharma (Waiter)',
+    username: 'priya',
+    pinOrPass: '1234',
+    role: 'WAITER',
+    restaurant_id: 'rest_1',
+    is_active: true
+  },
+  {
+    id: 'staff_waiter_3',
+    name: 'Rahul Varma (Waiter)',
+    username: 'rahul',
     pinOrPass: '1234',
     role: 'WAITER',
     restaurant_id: 'rest_1',
@@ -307,7 +362,13 @@ export default function App() {
   const [staff, setStaff] = useState<StaffUser[]>(() => {
     try {
       const saved = localStorage.getItem(`${STORAGE_KEY}_staff`);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: StaffUser[] = JSON.parse(saved);
+        // Ensure initial waiters are present even if previous storage had fewer staff
+        const missing = INITIAL_STAFF.filter((s) => !parsed.some((p) => p.username === s.username));
+        if (missing.length > 0) return [...parsed, ...missing];
+        return parsed;
+      }
     } catch {}
     return INITIAL_STAFF;
   });
@@ -332,9 +393,17 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [toasts, setToasts] = useState<{ id: string; msg: string }[]>([]);
 
-  // Manager navigation & features (Version 3.0)
+  // Waiter ordering attribution state (defaults to first active waiter)
+  const [activeWaiterId, setActiveWaiterId] = useState<string>('staff_waiter_1');
+
+  // Manager navigation & features (Version 3.0 + Waiter Attribution)
   const [managerSubTab, setManagerSubTab] = useState<'BILLS' | 'MENU_WATCH' | 'TABLES'>('BILLS');
   const [activeBillPrint, setActiveBillPrint] = useState<PrintableBillData | null>(null);
+  const [thermalPrintLayout, setThermalPrintLayout] = useState<'STANDARD' | 'BY_WAITER'>('STANDARD');
+  const [tableBillViewModes, setTableBillViewModes] = useState<{ [tableName: string]: 'ITEMS' | 'BY_WAITER' }>({});
+  const [managerWaiterFilter, setManagerWaiterFilter] = useState<string>('ALL');
+  const [inspectingWaiterModal, setInspectingWaiterModal] = useState<string | null>(null);
+
   const [menuSearchQuery, setMenuSearchQuery] = useState('');
   const [menuFilterCategory, setMenuFilterCategory] = useState('All');
   const [editingDishId, setEditingDishId] = useState<string | null>(null);
