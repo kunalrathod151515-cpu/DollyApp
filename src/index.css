@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+@media print {
+  /* Hide everything except the thermal receipt modal when printing */
+  body * {
+    visibility: hidden;
+  }
+  #printable-thermal-receipt,
+  #printable-thermal-receipt * {
+    visibility: visible;
+  }
+  #printable-thermal-receipt {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 80mm;
+    margin: 0 auto;
+    padding: 8px;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

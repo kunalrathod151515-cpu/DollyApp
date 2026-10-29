@@ -32,7 +32,14 @@ import {
   Download,
   AlertTriangle,
   LayoutGrid,
-  ArrowLeft
+  ArrowLeft,
+  Printer,
+  Edit2,
+  Check,
+  X,
+  FileText,
+  SlidersHorizontal,
+  Copy
 } from 'lucide-react';
 
 import {
@@ -77,13 +84,30 @@ interface Restaurant {
   is_synced: boolean;
 }
 
-interface MenuItem {
+export interface MenuItem {
   id: string;
   restaurant_id: string;
   name: string;
   category: string;
   price: number;
   is_synced: boolean;
+  is_available?: boolean;
+}
+
+export interface PrintableBillData {
+  title: string;
+  restaurantName: string;
+  restaurantCity: string;
+  billNo: string;
+  tableName: string;
+  waiterName?: string;
+  dateTime: string;
+  items: { name: string; qty: number; price: number; amount: number }[];
+  subtotal: number;
+  gstAmount: number;
+  grandTotal: number;
+  paymentMode?: string;
+  isSettled: boolean;
 }
 
 interface KotItem {
@@ -307,6 +331,16 @@ export default function App() {
   const [chefNote, setChefNote] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [toasts, setToasts] = useState<{ id: string; msg: string }[]>([]);
+
+  // Manager navigation & features (Version 3.0)
+  const [managerSubTab, setManagerSubTab] = useState<'BILLS' | 'MENU_WATCH' | 'TABLES'>('BILLS');
+  const [activeBillPrint, setActiveBillPrint] = useState<PrintableBillData | null>(null);
+  const [menuSearchQuery, setMenuSearchQuery] = useState('');
+  const [menuFilterCategory, setMenuFilterCategory] = useState('All');
+  const [editingDishId, setEditingDishId] = useState<string | null>(null);
+  const [editDishName, setEditDishName] = useState('');
+  const [editDishCat, setEditDishCat] = useState('');
+  const [editDishPrice, setEditDishPrice] = useState('');
 
   // Manager inputs for Menu & Tables
   const [newDishName, setNewDishName] = useState('');
@@ -583,6 +617,28 @@ export default function App() {
     });
   }, [currentRestaurantMenus, selectedCategory, searchQuery]);
 
+  // Manager live menu watch filters and statistics
+  const managerFilteredMenus = useMemo(() => {
+    return currentRestaurantMenus.filter((m) => {
+      const matchCat = menuFilterCategory === 'All' || m.category === menuFilterCategory;
+      const matchQ = m.name.toLowerCase().includes(menuSearchQuery.toLowerCase());
+      return matchCat && matchQ;
+    });
+  }, [currentRestaurantMenus, menuFilterCategory, menuSearchQuery]);
+
+  const managerMenuCategories = useMemo(() => {
+    const cats = Array.from(new Set(currentRestaurantMenus.map((m) => m.category || 'General')));
+    return ['All', ...cats];
+  }, [currentRestaurantMenus]);
+
+  const menuStats = useMemo(() => {
+    const total = currentRestaurantMenus.length;
+    const inStock = currentRestaurantMenus.filter((m) => m.is_available !== false).length;
+    const outOfStock = total - inStock;
+    const avgPrice = total > 0 ? Math.round(currentRestaurantMenus.reduce((sum, m) => sum + m.price, 0) / total) : 0;
+    return { total, inStock, outOfStock, avgPrice };
+  }, [currentRestaurantMenus]);
+
   const activeKots = useMemo(() => {
     return kots.filter((k) => k.restaurant_id === activeRestaurantId && k.status !== 'BILLED');
   }, [kots, activeRestaurantId]);
@@ -786,6 +842,228 @@ export default function App() {
       await setDoc(doc(db, 'menus', dishId), newItem);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'menus');
+    }
+  };
+
+  // Manager: Bill Printing Handlers (Version 3.0)
+  const handlePrintRunningBill = (tableName: string) => {
+    const tableKots = kots.filter(
+      (k) => k.restaurant_id === activeRestaurantId && k.table_name === tableName && k.status !== 'BILLED'
+    );
+    if (!tableKots.length) {
+      showToast('⚠️ No active orders on this table to print bill!');
+      return;
+    }
+
+    const itemMap: { [name: string]: { qty: number; price: number } } = {};
+    tableKots.forEach((k) => {
+      k.items.forEach((i) => {
+        if (!itemMap[i.name]) {
+          itemMap[i.name] = { qty: 0, price: i.price };
+        }
+        itemMap[i.name].qty += i.qty;
+      });
+    });
+
+    const items = Object.entries(itemMap).map(([name, data]) => ({
+      name,
+      qty: data.qty,
+      price: data.price,
+      amount: data.qty * data.price
+    }));
+
+    const subtotal = items.reduce((acc, i) => acc + i.amount, 0);
+    const gstAmount = Math.round(subtotal * 0.05);
+    const grandTotal = subtotal + gstAmount;
+    const waiterName = tableKots[0]?.waiter_name || currentUser?.name || 'Staff';
+    const now = new Date();
+    const dateStr =
+      now.toLocaleDateString([], { day: '2-digit', month: 'short', year: 'numeric' }) +
+      ' ' +
+      now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const billData: PrintableBillData = {
+      title: 'TAX INVOICE / TABLE BILL',
+      restaurantName: activeRestaurant.name,
+      restaurantCity: activeRestaurant.city,
+      billNo: `INV-${tableKots[0]?.token_no || Math.floor(1000 + Math.random() * 9000)}`,
+      tableName,
+      waiterName,
+      dateTime: dateStr,
+      items,
+      subtotal,
+      gstAmount,
+      grandTotal,
+      paymentMode: 'PENDING / RUNNING',
+      isSettled: false
+    };
+
+    setActiveBillPrint(billData);
+    playAudioBeep(680);
+    showToast(`🖨️ Generated Thermal Bill Preview for ${tableName}`);
+  };
+
+  const handlePrintSettledBill = (order: CompletedOrder) => {
+    const parsedItems: { name: string; qty: number; price: number; amount: number }[] = [];
+    if (order.summary) {
+      const parts = order.summary.split(', ');
+      parts.forEach((part) => {
+        const match = part.match(/(.+) ×(\d+)/);
+        if (match) {
+          const name = match[1].trim();
+          const qty = parseInt(match[2], 10) || 1;
+          const dish = menus.find((m) => m.name.toLowerCase() === name.toLowerCase());
+          const price = dish ? dish.price : Math.round(order.grand_total / (parts.length * qty * 1.05));
+          parsedItems.push({
+            name,
+            qty,
+            price,
+            amount: price * qty
+          });
+        }
+      });
+    }
+
+    const calculatedSubtotal = parsedItems.reduce((acc, i) => acc + i.amount, 0);
+    const subtotal = calculatedSubtotal > 0 ? calculatedSubtotal : Math.round(order.grand_total / 1.05);
+    const gstAmount = order.grand_total - subtotal;
+    const now = new Date();
+    const dateStr = order.date ? `${order.date}` : now.toLocaleDateString() + ' ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const billData: PrintableBillData = {
+      title: 'SETTLED TAX INVOICE / RECEIPT',
+      restaurantName: activeRestaurant.name,
+      restaurantCity: activeRestaurant.city,
+      billNo: `RCPT-${order.id.slice(-6).toUpperCase()}`,
+      tableName: order.table_name,
+      dateTime: dateStr,
+      items: parsedItems.length > 0 ? parsedItems : [{ name: order.summary || 'Restaurant Dine-In', qty: 1, price: subtotal, amount: subtotal }],
+      subtotal,
+      gstAmount,
+      grandTotal: order.grand_total,
+      paymentMode: order.payment_mode,
+      isSettled: true
+    };
+
+    setActiveBillPrint(billData);
+    playAudioBeep(680);
+    showToast(`🖨️ Generated Receipt Preview for ${order.table_name}`);
+  };
+
+  const handleCopyBillReceipt = async (bill: PrintableBillData) => {
+    const text = [
+      `================================`,
+      `       ${bill.restaurantName.toUpperCase()}`,
+      `       ${bill.restaurantCity}`,
+      `       ${bill.title}`,
+      `================================`,
+      `Bill No: ${bill.billNo}`,
+      `Table: ${bill.tableName} | Server: ${bill.waiterName || 'Staff'}`,
+      `Date/Time: ${bill.dateTime}`,
+      `--------------------------------`,
+      `ITEM                  QTY  RATE  AMOUNT`,
+      ...bill.items.map(
+        (i) => `${i.name.padEnd(20).slice(0, 20)} ${i.qty.toString().padStart(3)}  ₹${i.price.toString().padStart(4)}  ₹${i.amount.toString().padStart(5)}`
+      ),
+      `--------------------------------`,
+      `Sub Total:                     ₹${bill.subtotal}`,
+      `CGST (2.5%):                   ₹${Math.round(bill.gstAmount / 2)}`,
+      `SGST (2.5%):                   ₹${Math.round(bill.gstAmount / 2)}`,
+      `Total GST (5%):                ₹${bill.gstAmount}`,
+      `--------------------------------`,
+      `GRAND TOTAL:                   ₹${bill.grandTotal}`,
+      `Payment Status: ${bill.isSettled ? `PAID via ${bill.paymentMode}` : 'UNBILLED / RUNNING'}`,
+      `================================`,
+      `  Thank you for dining with us!`,
+      `        Please Visit Again`,
+      `================================`
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('📋 Bill text copied to clipboard!');
+    } catch {
+      showToast('📋 Bill text copied');
+    }
+  };
+
+  // Manager: Menu Watch & Live Item Management (Version 3.0)
+  const handleToggleDishStock = async (dishId: string) => {
+    const target = menus.find((m) => m.id === dishId);
+    if (!target) return;
+    const newStock = !(target.is_available ?? true);
+    const updated: MenuItem = { ...target, is_available: newStock, is_synced: isOnline };
+    const nextMenus = menus.map((m) => (m.id === dishId ? updated : m));
+    setMenus(nextMenus);
+    saveLocalState('menus', nextMenus);
+    showToast(newStock ? `🟢 ${target.name} is now In Stock & Available` : `🔴 ${target.name} marked Out of Stock (86)`);
+    playAudioBeep(600);
+
+    try {
+      await setDoc(doc(db, 'menus', dishId), updated);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `menus/${dishId}`);
+    }
+  };
+
+  const handleStartEditDish = (dish: MenuItem) => {
+    setEditingDishId(dish.id);
+    setEditDishName(dish.name);
+    setEditDishCat(dish.category);
+    setEditDishPrice(dish.price.toString());
+  };
+
+  const handleCancelEditDish = () => {
+    setEditingDishId(null);
+    setEditDishName('');
+    setEditDishCat('');
+    setEditDishPrice('');
+  };
+
+  const handleSaveEditDish = async (dishId: string) => {
+    const target = menus.find((m) => m.id === dishId);
+    if (!target) return;
+    const priceNum = parseFloat(editDishPrice);
+    if (!editDishName.trim() || isNaN(priceNum) || priceNum <= 0) {
+      showToast('⚠️ Please enter valid dish name and price');
+      return;
+    }
+
+    const updated: MenuItem = {
+      ...target,
+      name: editDishName.trim(),
+      category: editDishCat.trim() || target.category,
+      price: priceNum,
+      is_synced: isOnline
+    };
+
+    const nextMenus = menus.map((m) => (m.id === dishId ? updated : m));
+    setMenus(nextMenus);
+    saveLocalState('menus', nextMenus);
+    handleCancelEditDish();
+    showToast(`✅ Updated ${updated.name} (₹${priceNum})`);
+    playAudioBeep(680);
+
+    try {
+      await setDoc(doc(db, 'menus', dishId), updated);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `menus/${dishId}`);
+    }
+  };
+
+  const handleDeleteDish = async (dishId: string, dishName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${dishName}" from the restaurant menu?`)) {
+      return;
+    }
+    const nextMenus = menus.filter((m) => m.id !== dishId);
+    setMenus(nextMenus);
+    saveLocalState('menus', nextMenus);
+    showToast(`🗑️ Deleted ${dishName} from menu`);
+
+    try {
+      await deleteDoc(doc(db, 'menus', dishId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `menus/${dishId}`);
     }
   };
 
@@ -1690,11 +1968,14 @@ export default function App() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         {filteredMenus.map((item) => {
                           const qty = cart[item.id] || 0;
+                          const isOutOfStock = item.is_available === false;
                           return (
                             <div
                               key={item.id}
                               className={`flex items-center justify-between p-3 rounded-xl border-1.5 transition ${
-                                qty > 0
+                                isOutOfStock
+                                  ? 'border-slate-200 bg-slate-100/70 opacity-60'
+                                  : qty > 0
                                   ? 'border-[#ff5722] bg-orange-50/50'
                                   : 'border-slate-200 bg-white hover:border-slate-300'
                               }`}
@@ -1706,27 +1987,42 @@ export default function App() {
                                   </span>
                                   <span className="truncate">{item.name}</span>
                                 </div>
-                                <div className="text-xs font-extrabold text-slate-500 mt-0.5">₹{item.price}</div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-xs font-extrabold text-slate-500">₹{item.price}</span>
+                                  {isOutOfStock && (
+                                    <span className="text-[10px] font-black bg-red-100 text-red-700 px-1.5 py-0.2 rounded border border-red-200">
+                                      Out of Stock
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="flex items-center gap-1.5 flex-shrink-0">
-                                {qty > 0 ? (
+                                {isOutOfStock ? (
+                                  <span className="text-[11px] font-bold text-slate-400 px-2 py-1 bg-slate-200 rounded-lg">
+                                    86'd
+                                  </span>
+                                ) : (
                                   <>
+                                    {qty > 0 ? (
+                                      <>
+                                        <button
+                                          onClick={() => updateCart(item.id, -1)}
+                                          className="w-8 h-8 rounded-lg bg-slate-200 text-slate-800 flex items-center justify-center font-black text-sm hover:bg-slate-300 transition cursor-pointer"
+                                        >
+                                          <Minus className="w-3.5 h-3.5" />
+                                        </button>
+                                        <span className="font-black text-sm min-w-5 text-center">{qty}</span>
+                                      </>
+                                    ) : null}
                                     <button
-                                      onClick={() => updateCart(item.id, -1)}
-                                      className="w-8 h-8 rounded-lg bg-slate-200 text-slate-800 flex items-center justify-center font-black text-sm hover:bg-slate-300 transition cursor-pointer"
+                                      onClick={() => updateCart(item.id, 1)}
+                                      className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black text-sm shadow-sm shadow-orange-500/30 hover:opacity-90 transition cursor-pointer"
                                     >
-                                      <Minus className="w-3.5 h-3.5" />
+                                      <Plus className="w-3.5 h-3.5" />
                                     </button>
-                                    <span className="font-black text-sm min-w-5 text-center">{qty}</span>
                                   </>
-                                ) : null}
-                                <button
-                                  onClick={() => updateCart(item.id, 1)}
-                                  className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black text-sm shadow-sm shadow-orange-500/30 hover:opacity-90 transition cursor-pointer"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                </button>
+                                )}
                               </div>
                             </div>
                           );
@@ -1977,261 +2273,819 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= 3. MANAGER WORKSPACE ================= */}
+        {/* ================= 3. MANAGER WORKSPACE (Version 3.0) ================= */}
         {currentRole === 'MANAGER' && (
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-            {/* Left Column: Running Bills & Settled Orders */}
-            <div className="md:col-span-7 space-y-4">
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="font-black text-sm sm:text-base flex items-center gap-2">
-                    <Receipt className="w-4 h-4 text-[#ff5722]" />
-                    <span>🧾 Running Table Bills (5% GST Included)</span>
-                  </div>
+          <div className="space-y-4">
+            {/* Manager Header & Section Tabs */}
+            <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white flex items-center justify-center font-black shadow-sm flex-shrink-0">
+                  <Receipt className="w-5 h-5" />
                 </div>
-
-                {Object.keys(managerTableGroups).length === 0 ? (
-                  <div className="text-xs text-slate-400 py-6 text-center">
-                    No active table bills pending settlement.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {Object.entries(managerTableGroups).map(([tName, kotsList]) => {
-                      let subtotal = 0;
-                      const rows: { name: string; qty: number; price: number }[] = [];
-                      kotsList.forEach((k) => {
-                        k.items.forEach((i) => {
-                          subtotal += i.price * i.qty;
-                          rows.push({ name: i.name, qty: i.qty, price: i.price * i.qty });
-                        });
-                      });
-                      const gst = Math.round(subtotal * 0.05);
-                      const grand = subtotal + gst;
-
-                      return (
-                        <div key={tName} className="p-4 rounded-xl border border-slate-200 bg-slate-50">
-                          <div className="flex justify-between items-center border-b border-slate-200 pb-2 mb-2">
-                            <span className="font-black text-base text-slate-900">{tName}</span>
-                            <div className="text-right">
-                              <span className="text-xs text-slate-500">Subtotal ₹{subtotal} + GST ₹{gst} = </span>
-                              <span className="font-black text-base text-[#ff5722] ml-1">₹{grand}</span>
-                            </div>
-                          </div>
-
-                          <div className="space-y-1 mb-3">
-                            {rows.map((r, idx) => (
-                              <div key={idx} className="flex justify-between text-xs text-slate-700">
-                                <span>{r.name} × {r.qty}</span>
-                                <span className="font-bold">₹{r.price}</span>
-                              </div>
-                            ))}
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200">
-                            <button
-                              onClick={() => settleTableBill(tName, 'CASH')}
-                              className="py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                            >
-                              <DollarSign className="w-3.5 h-3.5" />
-                              <span>💵 Cash Settle</span>
-                            </button>
-                            <button
-                              onClick={() => settleTableBill(tName, 'UPI')}
-                              className="py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
-                            >
-                              <Smartphone className="w-3.5 h-3.5" />
-                              <span>📱 UPI Settle</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
+                    <span>Manager Console</span>
+                    <span className="text-[10px] font-black bg-orange-100 text-[#ff5722] px-2 py-0.5 rounded-full uppercase">
+                      v3.0 Pro
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {activeRestaurant.name} • {activeRestaurant.city} ({currentRestaurantTables.length} Tables)
+                  </p>
+                </div>
               </div>
 
-              {/* Today's Settled Bills */}
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                <div className="font-black text-sm sm:text-base mb-3 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span>✅ Today's Settled Bills</span>
-                </div>
+              {/* Manager Sub-Navigation Tabs */}
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 overflow-x-auto scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setManagerSubTab('BILLS')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                    managerSubTab === 'BILLS'
+                      ? 'bg-gradient-to-r from-[#ff6b35] to-[#f73819] text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                  }`}
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Bill Printing Desk</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      managerSubTab === 'BILLS' ? 'bg-black/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {Object.keys(managerTableGroups).length}
+                  </span>
+                </button>
 
-                {completedOrders.filter((o) => o.restaurant_id === activeRestaurantId).length === 0 ? (
-                  <div className="text-xs text-slate-400 py-4 text-center">No completed bills yet today.</div>
-                ) : (
-                  <div className="space-y-2 max-h-56 overflow-y-auto">
-                    {completedOrders
-                      .filter((o) => o.restaurant_id === activeRestaurantId)
-                      .map((o) => (
-                        <div
-                          key={o.id}
-                          className="flex justify-between items-center text-xs p-2 rounded-lg bg-slate-50 border border-slate-100"
-                        >
-                          <div>
-                            <strong className="text-slate-800">{o.table_name}</strong>
-                            <span className="text-slate-500 ml-1.5">({o.payment_mode})</span>
-                            <div className="text-[11px] text-slate-400 truncate max-w-xs">{o.summary}</div>
-                          </div>
-                          <span className="font-black text-emerald-600 text-sm">₹{o.grand_total}</span>
-                        </div>
-                      ))}
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setManagerSubTab('MENU_WATCH')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                    managerSubTab === 'MENU_WATCH'
+                      ? 'bg-gradient-to-r from-[#ff6b35] to-[#f73819] text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                  }`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Menu Watch & Catalog</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      managerSubTab === 'MENU_WATCH' ? 'bg-black/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {currentRestaurantMenus.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setManagerSubTab('TABLES')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                    managerSubTab === 'TABLES'
+                      ? 'bg-gradient-to-r from-[#ff6b35] to-[#f73819] text-white shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Dining Tables</span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                      managerSubTab === 'TABLES' ? 'bg-black/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {currentRestaurantTables.length}
+                  </span>
+                </button>
               </div>
             </div>
 
-            {/* Right Column: Add Dining Table, Add Menu Dish & Activity */}
-            <div className="md:col-span-5 space-y-4">
-              {/* CARD 1: ADD NEW DINING TABLE (Styled identically to Add New Menu Dish) */}
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="font-black text-sm sm:text-base flex items-center gap-2">
-                    <LayoutGrid className="w-4 h-4 text-[#ff5722]" />
-                    <span>🪑 Add New Table</span>
-                  </div>
-                  <span className="text-[11px] font-bold bg-orange-50 text-[#ff5722] px-2.5 py-0.5 rounded-full border border-orange-200">
-                    {currentRestaurantTables.length} Active Tables
-                  </span>
-                </div>
-
-                <form onSubmit={handleAddTable} className="space-y-2.5">
-                  <input
-                    type="text"
-                    placeholder="Table Name / No (e.g. Table 7, T-4, Rooftop 1)"
-                    value={newTableName}
-                    onChange={(e) => setNewTableName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      max="40"
-                      placeholder="Capacity (e.g. 4 Pax)"
-                      value={newTableCapacity}
-                      onChange={(e) => setNewTableCapacity(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
-                    />
-                    <div className="flex items-center text-xs text-slate-500 font-bold px-1">
-                      👥 Seating Capacity
-                    </div>
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
-                  >
-                    + Add Table to Restaurant
-                  </button>
-                </form>
-
-                {/* Active tables list with delete capability */}
-                <div className="mt-4 pt-3 border-t border-slate-100">
-                  <div className="text-xs font-bold text-slate-600 mb-2 flex items-center justify-between">
-                    <span>Configured Tables:</span>
-                    <span className="text-[10px] text-slate-400">Click 🗑️ to remove</span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-44 overflow-y-auto pr-1">
-                    {currentRestaurantTables.map((tbl) => {
-                      const isRunning = activeKots.some((k) => k.table_name === tbl.name);
-                      return (
-                        <div
-                          key={tbl.id}
-                          className={`p-2 rounded-xl border flex items-center justify-between text-xs transition ${
-                            isRunning ? 'bg-amber-50/80 border-amber-300' : 'bg-slate-50 border-slate-200'
-                          }`}
-                        >
-                          <div className="min-w-0 pr-1">
-                            <span className="font-extrabold text-slate-900 block truncate">{tbl.name}</span>
-                            <span className="text-[10px] text-slate-500 block">
-                              {tbl.capacity || 4} Pax • {isRunning ? '🟠 Running' : '🟢 Free'}
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTable(tbl)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer flex-shrink-0"
-                            title="Delete table"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+            {/* ================= SUBTAB 1: BILL PRINTING & SETTLEMENT DESK ================= */}
+            {managerSubTab === 'BILLS' && (
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                {/* Left Column: Running Table Bills & Printable Actions */}
+                <div className="md:col-span-7 space-y-4">
+                  {/* Running Table Bills Card */}
+                  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-slate-100">
+                      <div>
+                        <div className="font-black text-sm sm:text-base flex items-center gap-2 text-slate-900">
+                          <Receipt className="w-4 h-4 text-[#ff5722]" />
+                          <span>Active Table Bills (5% GST Breakdown)</span>
                         </div>
-                      );
-                    })}
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">
+                          Print thermal receipts for customers before or during payment settlement.
+                        </p>
+                      </div>
+                      <span className="self-start sm:self-auto text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-xl">
+                        {Object.keys(managerTableGroups).length} Tables Running
+                      </span>
+                    </div>
+
+                    {Object.keys(managerTableGroups).length === 0 ? (
+                      <div className="text-center py-10 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                        <Receipt className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                        <p className="text-sm font-extrabold text-slate-700">No Active Running Bills</p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          When waiters punch orders, active bills and thermal print options appear here automatically.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3.5">
+                        {Object.entries(managerTableGroups).map(([tName, kotsList]) => {
+                          let subtotal = 0;
+                          const rows: { name: string; qty: number; price: number }[] = [];
+                          kotsList.forEach((k) => {
+                            k.items.forEach((i) => {
+                              subtotal += i.price * i.qty;
+                              rows.push({ name: i.name, qty: i.qty, price: i.price * i.qty });
+                            });
+                          });
+                          const gst = Math.round(subtotal * 0.05);
+                          const grand = subtotal + gst;
+                          const totalItemsCount = rows.reduce((acc, r) => acc + r.qty, 0);
+
+                          return (
+                            <div
+                              key={tName}
+                              className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 hover:bg-slate-50 transition shadow-xs"
+                            >
+                              <div className="flex justify-between items-start border-b border-slate-200 pb-2.5 mb-2.5">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-black text-base text-slate-900">{tName}</span>
+                                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md">
+                                      {kotsList.length} KOT Ticket{kotsList.length > 1 ? 's' : ''}
+                                    </span>
+                                  </div>
+                                  <span className="text-xs text-slate-500 font-semibold block mt-0.5">
+                                    {totalItemsCount} Total Items • Waiter: {kotsList[0]?.waiter_name || 'Staff'}
+                                  </span>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-[11px] text-slate-500 font-medium">
+                                    Subtotal ₹{subtotal} + 5% GST ₹{gst}
+                                  </div>
+                                  <div className="font-black text-lg text-[#ff5722]">₹{grand}</div>
+                                </div>
+                              </div>
+
+                              {/* Items list preview */}
+                              <div className="space-y-1 mb-3.5 bg-white p-2.5 rounded-xl border border-slate-200 max-h-36 overflow-y-auto">
+                                {rows.map((r, idx) => (
+                                  <div key={idx} className="flex justify-between text-xs text-slate-700">
+                                    <span className="font-medium">
+                                      • {r.name} <b className="text-slate-900">× {r.qty}</b>
+                                    </span>
+                                    <span className="font-bold text-slate-800">₹{r.price}</span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Action buttons: PRINT BILL + SETTLE */}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-200">
+                                <button
+                                  type="button"
+                                  onClick={() => handlePrintRunningBill(tName)}
+                                  className="py-2.5 px-3 rounded-xl bg-[#0f172a] hover:bg-slate-800 text-white font-black text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer sm:col-span-1"
+                                  title="Open thermal bill print preview"
+                                >
+                                  <Printer className="w-3.5 h-3.5 text-orange-400" />
+                                  <span>Print Bill</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => settleTableBill(tName, 'CASH')}
+                                  className="py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                                >
+                                  <DollarSign className="w-3.5 h-3.5" />
+                                  <span>Cash Settle</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => settleTableBill(tName, 'UPI')}
+                                  className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition flex items-center justify-center gap-1.5 shadow-sm cursor-pointer"
+                                >
+                                  <Smartphone className="w-3.5 h-3.5" />
+                                  <span>UPI Settle</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Settled Bills History Card */}
+                  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                      <div className="font-black text-sm sm:text-base flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>Today's Settled Bills Archive</span>
+                      </div>
+                      <span className="text-xs font-bold text-slate-500">
+                        {completedOrders.filter((o) => o.restaurant_id === activeRestaurantId).length} Bills Paid
+                      </span>
+                    </div>
+
+                    {completedOrders.filter((o) => o.restaurant_id === activeRestaurantId).length === 0 ? (
+                      <div className="text-xs text-slate-400 py-6 text-center">
+                        No settled orders yet today for this restaurant.
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                        {completedOrders
+                          .filter((o) => o.restaurant_id === activeRestaurantId)
+                          .map((o) => (
+                            <div
+                              key={o.id}
+                              className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:border-slate-300 transition"
+                            >
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <strong className="text-slate-900 text-sm font-black">{o.table_name}</strong>
+                                  <span
+                                    className={`text-[10px] font-black px-2 py-0.5 rounded uppercase ${
+                                      o.payment_mode === 'UPI'
+                                        ? 'bg-blue-100 text-blue-700'
+                                        : 'bg-emerald-100 text-emerald-700'
+                                    }`}
+                                  >
+                                    {o.payment_mode}
+                                  </span>
+                                  <span className="text-xs text-slate-400">{o.date}</span>
+                                </div>
+                                <div className="text-xs text-slate-500 truncate max-w-sm mt-0.5">
+                                  {o.summary}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2.5 justify-between sm:justify-end flex-shrink-0 pt-1 sm:pt-0 border-t sm:border-0 border-slate-200">
+                                <span className="font-black text-base text-emerald-600">₹{o.grand_total}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePrintSettledBill(o)}
+                                  className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 text-xs font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                                  title="Re-print settled bill receipt"
+                                >
+                                  <Printer className="w-3.5 h-3.5 text-[#ff5722]" />
+                                  <span>Print Slip</span>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {/* CARD 2: ADD NEW MENU DISH */}
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-                <div className="font-black text-sm sm:text-base mb-3 flex items-center gap-2">
-                  <UtensilsCrossed className="w-4 h-4 text-[#ff5722]" />
-                  <span>🍲 Add New Menu Dish</span>
-                </div>
+                {/* Right Column: Quick Bill Desk Tools & Revenue Overview */}
+                <div className="md:col-span-5 space-y-4">
+                  {/* Today's Sales Metrics */}
+                  <div className="bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#0f172a] text-white rounded-2xl p-5 border border-slate-800 shadow-md">
+                    <div className="flex items-center justify-between mb-4">
+                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                        <DollarSign className="w-4 h-4 text-emerald-400" />
+                        <span>Today's Revenue Desk</span>
+                      </span>
+                      <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30">
+                        LIVE
+                      </span>
+                    </div>
 
-                <form onSubmit={handleAddDish} className="space-y-2.5">
-                  <input
-                    type="text"
-                    placeholder="Dish Name (e.g. Cheese Butter Masala)"
-                    value={newDishName}
-                    onChange={(e) => setNewDishName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      placeholder="Category (Main / Bread)"
-                      value={newDishCat}
-                      onChange={(e) => setNewDishCat(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Price (₹)"
-                      value={newDishPrice}
-                      onChange={(e) => setNewDishPrice(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
-                  >
-                    + Save Dish to Menu
-                  </button>
-                </form>
-              </div>
+                    <div className="text-3xl font-black text-white mb-1">
+                      ₹
+                      {completedOrders
+                        .filter((o) => o.restaurant_id === activeRestaurantId)
+                        .reduce((sum, o) => sum + o.grand_total, 0)}
+                    </div>
+                    <div className="text-xs text-slate-400 mb-4 font-medium">
+                      Calculated from {completedOrders.filter((o) => o.restaurant_id === activeRestaurantId).length}{' '}
+                      settled invoices today
+                    </div>
 
-              {/* Real-Time / Offline Status Stream */}
-              <div className="bg-[#0f172a] text-white rounded-2xl p-4 border border-slate-800 shadow-sm">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="font-black text-xs sm:text-sm text-amber-400 flex items-center gap-1.5">
-                    <Cloud className="w-4 h-4" />
-                    <span>POS Local & Cloud Queue</span>
-                  </div>
-                  <span className={`text-[10px] font-mono ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {isOnline ? 'ONLINE SYNC' : 'LOCAL CACHE'}
-                  </span>
-                </div>
-
-                <div className="font-mono text-[11px] max-h-52 overflow-y-auto space-y-1.5 pr-1">
-                  {kots.length === 0 ? (
-                    <div className="text-slate-500 py-2">No tickets generated yet.</div>
-                  ) : (
-                    kots.map((k) => (
-                      <div key={k.id} className="flex justify-between items-center py-1 border-b border-slate-800">
-                        <span className="truncate max-w-[190px] text-slate-300">
-                          [KOT #{k.token_no}] {k.table_name} ({k.status})
-                        </span>
-                        <span className={`text-[10px] font-bold ${isOnline ? 'text-emerald-400' : 'text-amber-400'}`}>
-                          {isOnline ? '✔ CLOUD' : '💾 OFFLINE'}
+                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-800 text-xs">
+                      <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700">
+                        <span className="text-slate-400 block text-[11px]">Running Tables</span>
+                        <span className="text-lg font-black text-amber-400">
+                          {Object.keys(managerTableGroups).length}
                         </span>
                       </div>
-                    ))
-                  )}
+                      <div className="bg-slate-800/60 p-2.5 rounded-xl border border-slate-700">
+                        <span className="text-slate-400 block text-[11px]">Menu Dishes</span>
+                        <span className="text-lg font-black text-emerald-400">
+                          {currentRestaurantMenus.length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Direct Quick Bill Print by Table */}
+                  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+                    <div className="font-black text-sm text-slate-900 mb-2 flex items-center gap-2">
+                      <Printer className="w-4 h-4 text-[#ff5722]" />
+                      <span>Direct Table Thermal Print</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3">
+                      Select any dining table to instantly generate and print a thermal invoice:
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      {currentRestaurantTables.map((tbl) => {
+                        const hasOrders = activeKots.some((k) => k.table_name === tbl.name);
+                        return (
+                          <button
+                            key={tbl.id}
+                            type="button"
+                            onClick={() => {
+                              if (hasOrders) {
+                                handlePrintRunningBill(tbl.name);
+                              } else {
+                                showToast(`ℹ️ ${tbl.name} has no active orders right now.`);
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-left transition flex items-center justify-between cursor-pointer ${
+                              hasOrders
+                                ? 'bg-orange-50/70 border-orange-300 hover:border-orange-400'
+                                : 'bg-slate-50 border-slate-200 hover:bg-slate-100 opacity-70'
+                            }`}
+                          >
+                            <div>
+                              <span className="font-extrabold text-xs text-slate-900 block">{tbl.name}</span>
+                              <span className="text-[10px] text-slate-500">
+                                {hasOrders ? '🟠 Active Orders' : 'Free'}
+                              </span>
+                            </div>
+                            <Printer
+                              className={`w-4 h-4 ${hasOrders ? 'text-[#ff5722]' : 'text-slate-400'}`}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* ================= SUBTAB 2: MENU ITEMS WATCH & CATALOG ================= */}
+            {managerSubTab === 'MENU_WATCH' && (
+              <div className="space-y-4">
+                {/* Top Statistics Bar for Manager Watching Menu */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="text-xs font-bold text-slate-500 uppercase">Total Menu Items</div>
+                    <div className="text-2xl font-black text-slate-900 mt-1">{menuStats.total}</div>
+                    <div className="text-[11px] text-slate-400 font-medium">In {activeRestaurant.name}</div>
+                  </div>
+
+                  <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="text-xs font-bold text-emerald-600 uppercase">In Stock / Available</div>
+                    <div className="text-2xl font-black text-emerald-600 mt-1">{menuStats.inStock}</div>
+                    <div className="text-[11px] text-slate-400 font-medium">Ready for orders</div>
+                  </div>
+
+                  <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="text-xs font-bold text-red-600 uppercase">Out of Stock (86'd)</div>
+                    <div className="text-2xl font-black text-red-600 mt-1">{menuStats.outOfStock}</div>
+                    <div className="text-[11px] text-slate-400 font-medium">Hidden from waitstaff</div>
+                  </div>
+
+                  <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+                    <div className="text-xs font-bold text-orange-600 uppercase">Average Dish Price</div>
+                    <div className="text-2xl font-black text-orange-600 mt-1">₹{menuStats.avgPrice}</div>
+                    <div className="text-[11px] text-slate-400 font-medium">{managerMenuCategories.length - 1} Categories</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                  {/* Left Column: Live Menu Watch List (Audit, Price Edit, Availability Toggle) */}
+                  <div className="lg:col-span-8 space-y-4">
+                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
+                            <UtensilsCrossed className="w-4 h-4 text-[#ff5722]" />
+                            <span>Restaurant Menu Watch & Audit</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 font-medium mt-0.5">
+                            Watch all active dishes, adjust prices, or mark dishes out-of-stock when kitchen runs out.
+                          </p>
+                        </div>
+                        <span className="text-xs font-extrabold bg-slate-100 text-slate-700 px-3 py-1 rounded-full self-start sm:self-auto border border-slate-200">
+                          {managerFilteredMenus.length} Dishes Listed
+                        </span>
+                      </div>
+
+                      {/* Search Bar & Category Filter Chips */}
+                      <div className="space-y-2.5 mb-4 pb-4 border-b border-slate-100">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                          <input
+                            type="text"
+                            value={menuSearchQuery}
+                            onChange={(e) => setMenuSearchQuery(e.target.value)}
+                            placeholder="Search dishes to watch (e.g. Paneer, Naan, Biryani, Dal)..."
+                            className="w-full bg-slate-50 border border-slate-200 pl-10 pr-4 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722] focus:bg-white transition"
+                          />
+                        </div>
+
+                        <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                          {managerMenuCategories.map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => setMenuFilterCategory(c)}
+                              className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                                menuFilterCategory === c
+                                  ? 'bg-[#0f172a] text-white'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              {c}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Live Menu Watch Cards / Rows */}
+                      {managerFilteredMenus.length === 0 ? (
+                        <div className="text-center py-10 text-slate-400 text-xs font-medium">
+                          No dishes found matching your search. Add dishes using the form on the right!
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {managerFilteredMenus.map((dish) => {
+                            const isEditing = editingDishId === dish.id;
+                            const isAvailable = dish.is_available !== false;
+
+                            if (isEditing) {
+                              return (
+                                <div
+                                  key={dish.id}
+                                  className="p-3.5 rounded-2xl border-2 border-orange-400 bg-orange-50/40 space-y-2.5"
+                                >
+                                  <div className="font-extrabold text-xs text-orange-800">
+                                    Editing Dish: {dish.name}
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <input
+                                      type="text"
+                                      value={editDishName}
+                                      onChange={(e) => setEditDishName(e.target.value)}
+                                      placeholder="Dish Name"
+                                      className="bg-white border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-orange-500"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={editDishCat}
+                                      onChange={(e) => setEditDishCat(e.target.value)}
+                                      placeholder="Category"
+                                      className="bg-white border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-orange-500"
+                                    />
+                                    <input
+                                      type="number"
+                                      value={editDishPrice}
+                                      onChange={(e) => setEditDishPrice(e.target.value)}
+                                      placeholder="Price (₹)"
+                                      className="bg-white border border-slate-300 px-3 py-1.5 rounded-xl text-xs font-bold outline-none focus:border-orange-500"
+                                    />
+                                  </div>
+                                  <div className="flex items-center justify-end gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={handleCancelEditDish}
+                                      className="px-3 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold transition cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSaveEditDish(dish.id)}
+                                      className="px-3 py-1 rounded-lg bg-[#ff5722] hover:bg-orange-600 text-white text-xs font-black transition flex items-center gap-1 shadow-xs cursor-pointer"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                      <span>Save Changes</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div
+                                key={dish.id}
+                                className={`p-3 sm:p-3.5 rounded-2xl border transition flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
+                                  !isAvailable
+                                    ? 'bg-red-50/40 border-red-200'
+                                    : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="w-8 h-8 rounded-xl bg-orange-50 border border-orange-200 text-[#ff5722] flex items-center justify-center font-black text-xs flex-shrink-0">
+                                    🍲
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-extrabold text-sm text-slate-900 truncate">
+                                        {dish.name}
+                                      </span>
+                                      <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
+                                        {dish.category}
+                                      </span>
+                                      {!isAvailable && (
+                                        <span className="text-[10px] font-black bg-red-100 text-red-700 px-2 py-0.5 rounded-md border border-red-200">
+                                          Out of Stock (86'd)
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs text-slate-500 font-semibold mt-0.5">
+                                      Served at: <b className="text-slate-800">{activeRestaurant.name}</b>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-0 border-slate-100">
+                                  {/* Price Tag */}
+                                  <span className="font-black text-base text-slate-900 min-w-16 text-right">
+                                    ₹{dish.price}
+                                  </span>
+
+                                  {/* In Stock / Out of Stock Switch */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleDishStock(dish.id)}
+                                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
+                                      isAvailable
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                        : 'bg-red-100 text-red-800 border border-red-300 hover:bg-red-200'
+                                    }`}
+                                    title="Click to toggle stock availability for waitstaff"
+                                  >
+                                    <span
+                                      className={`w-2 h-2 rounded-full ${
+                                        isAvailable ? 'bg-emerald-500' : 'bg-red-500'
+                                      }`}
+                                    />
+                                    <span>{isAvailable ? 'In Stock' : '86’d'}</span>
+                                  </button>
+
+                                  {/* Edit button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditDish(dish)}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition cursor-pointer"
+                                    title="Edit price or name"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  {/* Delete button */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteDish(dish.id, dish.name)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer"
+                                    title="Delete dish"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Add New Dish Form */}
+                  <div className="lg:col-span-4 space-y-4">
+                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm sticky top-20">
+                      <div className="font-black text-sm sm:text-base mb-2 flex items-center gap-2">
+                        <UtensilsCrossed className="w-4 h-4 text-[#ff5722]" />
+                        <span>Add New Menu Dish</span>
+                      </div>
+                      <p className="text-xs text-slate-500 mb-3.5">
+                        Add a new recipe or special dish to {activeRestaurant.name}'s menu catalog:
+                      </p>
+
+                      <form onSubmit={handleAddDish} className="space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                            Dish Name
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. Cheese Butter Masala"
+                            value={newDishName}
+                            onChange={(e) => setNewDishName(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                              Category
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Main Course"
+                              value={newDishCat}
+                              onChange={(e) => setNewDishCat(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                              Price (₹)
+                            </label>
+                            <input
+                              type="number"
+                              required
+                              placeholder="₹ Rate"
+                              value={newDishPrice}
+                              onChange={(e) => setNewDishPrice(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
+                        >
+                          + Save Dish to Menu Catalog
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ================= SUBTAB 3: TABLES MANAGEMENT ================= */}
+            {managerSubTab === 'TABLES' && (
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                {/* Left Column: Configured Tables list */}
+                <div className="md:col-span-7 space-y-4">
+                  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                      <div>
+                        <h3 className="font-black text-sm sm:text-base text-slate-900 flex items-center gap-2">
+                          <LayoutGrid className="w-4 h-4 text-[#ff5722]" />
+                          <span>Restaurant Dining Tables Setup</span>
+                        </h3>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">
+                          Tables configured for {activeRestaurant.name}.
+                        </p>
+                      </div>
+                      <span className="text-xs font-black bg-orange-50 text-[#ff5722] px-3 py-1 rounded-full border border-orange-200">
+                        {currentRestaurantTables.length} Active Tables
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-96 overflow-y-auto pr-1">
+                      {currentRestaurantTables.map((tbl) => {
+                        const isRunning = activeKots.some((k) => k.table_name === tbl.name);
+                        return (
+                          <div
+                            key={tbl.id}
+                            className={`p-3 rounded-2xl border flex flex-col justify-between transition ${
+                              isRunning
+                                ? 'bg-amber-50/80 border-amber-300'
+                                : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-1 mb-2">
+                              <div>
+                                <span className="font-extrabold text-sm text-slate-900 block truncate">
+                                  {tbl.name}
+                                </span>
+                                <span className="text-[11px] text-slate-500 font-semibold block mt-0.5">
+                                  👥 {tbl.capacity || 4} Seater
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTable(tbl)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition cursor-pointer"
+                                title="Delete table"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <span
+                              className={`text-[10px] font-black px-2 py-0.5 rounded-md inline-block uppercase self-start ${
+                                isRunning
+                                  ? 'bg-amber-200 text-amber-900'
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}
+                            >
+                              {isRunning ? '🟠 Running Order' : '🟢 Free Table'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Add Table Form & Queue Status */}
+                <div className="md:col-span-5 space-y-4">
+                  {/* Add New Table Form Card */}
+                  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+                    <div className="font-black text-sm sm:text-base mb-2 flex items-center gap-2">
+                      <LayoutGrid className="w-4 h-4 text-[#ff5722]" />
+                      <span>🪑 Add New Dining Table</span>
+                    </div>
+                    <p className="text-xs text-slate-500 mb-3.5">
+                      Configure additional tables or VIP dining booths for this restaurant:
+                    </p>
+
+                    <form onSubmit={handleAddTable} className="space-y-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                          Table Name / Number
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="e.g. Table 7, VIP-1, Rooftop 2"
+                          value={newTableName}
+                          onChange={(e) => setNewTableName(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
+                          Guest Capacity (Pax)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="40"
+                          placeholder="Capacity (e.g. 4 Pax)"
+                          value={newTableCapacity}
+                          onChange={(e) => setNewTableCapacity(e.target.value)}
+                          className="w-full bg-slate-50 border border-slate-200 px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold outline-none focus:border-[#ff5722]"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-br from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-sm hover:opacity-95 transition cursor-pointer"
+                      >
+                        + Add Table to Restaurant
+                      </button>
+                    </form>
+                  </div>
+
+                  {/* Cloud / Local Storage Queue */}
+                  <div className="bg-[#0f172a] text-white rounded-2xl p-4 border border-slate-800 shadow-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-black text-xs sm:text-sm text-amber-400 flex items-center gap-1.5">
+                        <Cloud className="w-4 h-4" />
+                        <span>POS Local & Cloud Queue</span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-mono ${
+                          isOnline ? 'text-emerald-400' : 'text-amber-400'
+                        }`}
+                      >
+                        {isOnline ? 'ONLINE SYNC' : 'LOCAL CACHE'}
+                      </span>
+                    </div>
+
+                    <div className="font-mono text-[11px] max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                      {kots.length === 0 ? (
+                        <div className="text-slate-500 py-2">No tickets generated yet.</div>
+                      ) : (
+                        kots.map((k) => (
+                          <div
+                            key={k.id}
+                            className="flex justify-between items-center py-1 border-b border-slate-800"
+                          >
+                            <span className="truncate max-w-[190px] text-slate-300">
+                              [KOT #{k.token_no}] {k.table_name} ({k.status})
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold ${
+                                isOnline ? 'text-emerald-400' : 'text-amber-400'
+                              }`}
+                            >
+                              {isOnline ? '✔ CLOUD' : '💾 OFFLINE'}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2503,6 +3357,161 @@ export default function App() {
                       </button>
                     </div>
                   ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* ================= 5. THERMAL BILL & RECEIPT PRINT MODAL (Version 3.0) ================= */}
+        {activeBillPrint && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-4 overflow-y-auto">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-4 sm:p-6 shadow-2xl text-slate-900 border border-slate-200 relative my-auto animate-scale-in">
+              {/* Modal Top Bar (Hidden on print) */}
+              <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-200 no-print">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-orange-100 text-[#ff5722] flex items-center justify-center font-black">
+                    <Printer className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-slate-900">Thermal Receipt Preview</h3>
+                    <p className="text-[11px] text-slate-500 font-semibold">Standard 80mm / 3-inch slip</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveBillPrint(null)}
+                  className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Thermal Receipt Paper (Prints cleanly via @media print) */}
+              <div
+                id="printable-thermal-receipt"
+                className="bg-white border-2 border-dashed border-slate-300 p-4 rounded-2xl font-mono text-slate-900 shadow-inner text-xs"
+              >
+                {/* Header */}
+                <div className="text-center pb-2.5 border-b border-dashed border-slate-400">
+                  <h2 className="font-black text-base sm:text-lg tracking-wide uppercase leading-tight">
+                    {activeBillPrint.restaurantName}
+                  </h2>
+                  <p className="text-xs text-slate-600 font-medium">{activeBillPrint.restaurantCity}</p>
+                  <p className="text-[9px] text-slate-500 font-bold mt-0.5">
+                    FSSAI: 11524029000184 • GSTIN: 27AABCP1330K1Z9
+                  </p>
+                  <div className="inline-block mt-1 px-2.5 py-0.5 bg-slate-100 rounded text-[10px] font-black uppercase tracking-wider">
+                    {activeBillPrint.title}
+                  </div>
+                </div>
+
+                {/* Metadata */}
+                <div className="py-2 border-b border-dashed border-slate-400 text-[11px] space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Bill No:</span>
+                    <span className="font-bold">{activeBillPrint.billNo}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Table:</span>
+                    <span className="font-black text-slate-900">{activeBillPrint.tableName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Server:</span>
+                    <span>{activeBillPrint.waiterName || 'Counter Staff'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Date/Time:</span>
+                    <span>{activeBillPrint.dateTime}</span>
+                  </div>
+                </div>
+
+                {/* Itemized Table */}
+                <div className="py-2 border-b border-dashed border-slate-400">
+                  <div className="flex justify-between font-black text-[10px] uppercase text-slate-600 pb-1 mb-1 border-b border-slate-200">
+                    <span className="w-6/12">Item</span>
+                    <span className="w-2/12 text-center">Qty</span>
+                    <span className="w-2/12 text-right">Rate</span>
+                    <span className="w-2/12 text-right">Total</span>
+                  </div>
+                  <div className="space-y-1 text-[11px]">
+                    {activeBillPrint.items.map((i, idx) => (
+                      <div key={idx} className="flex justify-between items-start">
+                        <span className="w-6/12 font-bold truncate pr-1">{i.name}</span>
+                        <span className="w-2/12 text-center">{i.qty}</span>
+                        <span className="w-2/12 text-right">₹{i.price}</span>
+                        <span className="w-2/12 text-right font-bold">₹{i.amount}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Calculations & GST */}
+                <div className="py-2 border-b border-dashed border-slate-400 text-[11px] space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-600">Sub Total:</span>
+                    <span className="font-bold">₹{activeBillPrint.subtotal}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 text-[10px]">
+                    <span>CGST (2.5%):</span>
+                    <span>₹{(activeBillPrint.gstAmount / 2).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 text-[10px]">
+                    <span>SGST (2.5%):</span>
+                    <span>₹{(activeBillPrint.gstAmount / 2).toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-700 font-semibold">
+                    <span>Total GST (5%):</span>
+                    <span>₹{activeBillPrint.gstAmount}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-black text-slate-900 pt-1.5 border-t border-slate-300">
+                    <span>GRAND TOTAL:</span>
+                    <span className="text-base sm:text-lg text-[#ff5722]">₹{activeBillPrint.grandTotal}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] font-bold text-slate-600 pt-0.5">
+                    <span>Payment Mode:</span>
+                    <span className={activeBillPrint.isSettled ? 'text-emerald-700 font-black' : 'text-amber-700 font-black'}>
+                      {activeBillPrint.isSettled ? `PAID (${activeBillPrint.paymentMode})` : 'UNBILLED / RUNNING'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Footer Message */}
+                <div className="text-center pt-2.5 text-[10px] text-slate-600 leading-tight">
+                  <p className="font-bold">Thank you for dining with us! 🙏</p>
+                  <p className="text-[9px] text-slate-400 mt-0.5">Please visit again • Have a great day</p>
+                  <div className="mt-2 text-[8px] font-mono text-slate-400 tracking-widest uppercase">
+                    *** Powered by POSHub Pro v3.0 ***
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons (Hidden on print) */}
+              <div className="mt-4 space-y-2 no-print">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#ff6b35] to-[#f73819] text-white font-black text-xs sm:text-sm shadow-md shadow-orange-500/30 hover:opacity-95 transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Print Thermal Bill (Thermal / A4)</span>
+                </button>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyBillReceipt(activeBillPrint)}
+                    className="py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Copy Text</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveBillPrint(null)}
+                    className="py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs transition cursor-pointer"
+                  >
+                    Close Preview
+                  </button>
                 </div>
               </div>
             </div>
